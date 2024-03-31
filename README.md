@@ -8,3 +8,4 @@ By: Alanis Negroni & Axel Orta
 ## Task 2: Sprite Animation
 https://github.com/Negroni1/CIIC4082-Project/assets/64982360/8ba603fc-b4c4-4d6c-9b3c-89495602a958
 
+
