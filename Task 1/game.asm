@@ -7,6 +7,8 @@
 .byte $00                   ; No PRG-RAM present
 .byte $00                   ; NTSC format
 
+.segment "STARTUP"
+
 .segment "CODE"
 .proc irq_handler       ; IRQ (Interrup Request) can be triggered by the NES’ sound processor or from certain types of cartridge hardware.
     RTI                 ; Return from Interrupt
@@ -128,14 +130,6 @@ vblankwait2:
 	STA $2006
 	LDX #$02
 	STX $2007
-
-    ; LDA $2002
-	; LDA #$22
-	; STA $2006
-	; LDA #$13
-	; STA $2006
-	; LDX #$00
-	; STX $2007
 
     LDA $2002
 	LDA #$22
@@ -371,83 +365,83 @@ vblankwait2:
 
 .segment "RODATA"               ; read-only data
     palettes:
-    ; BACKGROUND PALETTE -----------------------------------------------------------+
-    .byte $2B, $07, $17, $3A    ; green brown, brown, light green
-    .byte $2B, $0F, $0B, $3A    ; green, dark green, light green
-    .byte $2B, $1C, $2C, $3C    ; green blue, blue, light blue
-    .byte $2B, $1C, $17, $3A    ; green blue, brown, light green
-    ; SPRITE PALETTE  --------------------------------------------------------------+
-    .byte $2B, $0f, $3A, $20    ; green, black, green, white
-    .byte $2B, $0f, $1B, $3B    ; green, black, green, green
+		; BACKGROUND PALETTE -----------------------------------------------------------+
+		.byte $2B, $07, $17, $3A    ; green brown, brown, light green
+		.byte $2B, $0F, $0B, $3A    ; green, dark green, light green
+		.byte $2B, $1C, $2C, $3C    ; green blue, blue, light blue
+		.byte $2B, $1C, $17, $3A    ; green blue, brown, light green
+		; SPRITE PALETTE  --------------------------------------------------------------+
+		.byte $2B, $0f, $3A, $20    ; green, black, green, white
+		.byte $2B, $0f, $1B, $3B    ; green, black, green, green
 
     sprites:
-    ; L SIDE  ------------------------------------------------------------------------------------------------+
+    ; LEFT  ---------------------------------------------------------------------------------------------------+
 		; STANDING
-		.byte $50, $01, 00, $60    ; y = 50, tile number = 1, Special attribute flags - palette = 00, x = 60
-		.byte $50, $02, 00, $68    ; y = 50, tile number = 2, Special attribute flags - palette = 00, x = 68
-		.byte $58, $03, 01, $60    ; y = 58, tile number = 3, Special attribute flags - palette = 01, x = 60
-		.byte $58, $04, 01, $68    ; y = 58, tile number = 4, Special attribute flags - palette = 01, x = 68
+		.byte $40, $01, 00, $60    	; y = 40, tile number = 01, Special attribute flags - palette = 00, x = 60
+		.byte $40, $02, 00, $68    	; y = 40, tile number = 02, Special attribute flags - palette = 00, x = 68
+		.byte $48, $03, 01, $60    	; y = 48, tile number = 03, Special attribute flags - palette = 01, x = 60
+		.byte $48, $04, 01, $68    	; y = 48, tile number = 04, Special attribute flags - palette = 01, x = 68
     	; JUMPING 1
-		.byte $50, $05, 00, $70    ; y = 50, tile number = 5, Special attribute flags - palette = 00, x = 70
-		.byte $50, $06, 00, $78    ; y = 50, tile number = 6, Special attribute flags - palette = 00, x = 78
-		.byte $58, $07, 01, $70    ; y = 58, tile number = 7, Special attribute flags - palette = 01, x = 70
-		.byte $58, $08, 01, $78    ; y = 58, tile number = 8, Special attribute flags - palette = 01, x = 78
+		.byte $40, $05, 00, $70    	; y = 40, tile number = 05, Special attribute flags - palette = 00, x = 70
+		.byte $40, $06, 00, $78    	; y = 40, tile number = 06, Special attribute flags - palette = 00, x = 78
+		.byte $48, $07, 01, $70    	; y = 48, tile number = 07, Special attribute flags - palette = 01, x = 70
+		.byte $48, $08, 01, $78    	; y = 48, tile number = 08, Special attribute flags - palette = 01, x = 78
     	; JUMPING 2
-		.byte $50, $05, 00, $80    ; y = 50, tile number = 5, Special attribute flags - palette = 00, x = 80
-		.byte $50, $06, 00, $88    ; y = 50, tile number = 6, Special attribute flags - palette = 00, x = 88
-		.byte $58, $09, 01, $80    ; y = 58, tile number = 9, Special attribute flags - palette = 01, x = 80
-		.byte $58, $0A, 01, $88    ; y = 58, tile number = A, Special attribute flags - palette = 01, x = 88
+		.byte $40, $09, 00, $80    	; y = 40, tile number = 09, Special attribute flags - palette = 00, x = 80
+		.byte $40, $0A, 00, $88    	; y = 40, tile number = 0A, Special attribute flags - palette = 00, x = 88
+		.byte $48, $0B, 01, $80    	; y = 48, tile number = 0B, Special attribute flags - palette = 01, x = 80
+		.byte $48, $0C, 01, $88    	; y = 48, tile number = 0C, Special attribute flags - palette = 01, x = 88
 
-    ; R SIDE  -------------------------------------------------------------------------------------------+
+    ; RIGTH  --------------------------------------------------------------------------------------------------+
 		; STANDING
-		.byte $60, $01, %01000000, $88    ; y = 50, tile number = 1, Special attribute flags - flip horizontal = 6, palette = 00, x = 88
-		.byte $60, $02, %01000000, $80    ; y = 50, tile number = 2, Special attribute flags - flip horizontal = 6, palette = 00, x = 80
-		.byte $68, $03, %01000001, $88    ; y = 50, tile number = 3, Special attribute flags - flip horizontal = 6, palette = 01, x = 88
-		.byte $68, $04, %01000001, $80    ; y = 50, tile number = 4, Special attribute flags - flip horizontal = 6, palette = 01, x = 80
+		.byte $50, $25, $00, $60    ; y = 50, tile number = 25, Special attribute flags - palette = 00, x = 60
+		.byte $50, $26, $00, $68    ; y = 50, tile number = 26, Special attribute flags - palette = 00, x = 68
+		.byte $58, $27, $01, $60    ; y = 50, tile number = 27, Special attribute flags - palette = 01, x = 60
+		.byte $58, $28, $01, $68    ; y = 50, tile number = 28, Special attribute flags - palette = 01, x = 68
 		; JUMPING 1
-		.byte $60, $05, %01000000, $78    ; y = 60, tile number = 5, Special attribute flags - flip horizontal = 6, palette = 00, x = 78
-		.byte $60, $06, %01000000, $70    ; y = 60, tile number = 6, Special attribute flags - flip horizontal = 6, palette = 00, x = 70
-		.byte $68, $07, %01000001, $78    ; y = 68, tile number = 7, Special attribute flags - flip horizontal = 6, palette = 01, x = 78
-		.byte $68, $08, %01000001, $70    ; y = 68, tile number = 8, Special attribute flags - flip horizontal = 6, palette = 01, x = 70
+		.byte $50, $29, $00, $70    ; y = 50, tile number = 29, Special attribute flags - palette = 00, x = 70
+		.byte $50, $2A, $00, $78    ; y = 50, tile number = 2A, Special attribute flags - palette = 00, x = 78
+		.byte $58, $2B, $01, $70    ; y = 58, tile number = 2B, Special attribute flags - palette = 01, x = 70
+		.byte $58, $2C, $01, $78    ; y = 58, tile number = 2C, Special attribute flags - palette = 01, x = 78
 		; JUMPING 
-		.byte $50, $05, %01000000, $98    ; y = 60, tile number = 5, Special attribute flags - flip horizontal = 6, palette = 00, x = 68
-		.byte $50, $06, %01000000, $90    ; y = 60, tile number = 6, Special attribute flags - flip horizontal = 6, palette = 00, x = 60
-		.byte $58, $09, %01000001, $98    ; y = 68, tile number = 9, Special attribute flags - flip horizontal = 6, palette = 01, x = 68
-		.byte $58, $0A, %01000001, $90    ; y = 68, tile number = A, Special attribute flags - flip horizontal = 6, palette = 01, x = 60
+		.byte $50, $2D, $00, $80    ; y = 50, tile number = 2D, Special attribute flags - palette = 00, x = 80
+		.byte $50, $2E, $00, $88    ; y = 50, tile number = 2E, Special attribute flags - palette = 00, x = 88
+		.byte $58, $2F, $01, $80    ; y = 58, tile number = 2F, Special attribute flags - palette = 01, x = 80
+		.byte $58, $30, $01, $88    ; y = 58, tile number = 30, Special attribute flags - palette = 01, x = 88
     
-	; DOWN  -------------------------------------------------------------------------------------------+
+	; DOWN  ---------------------------------------------------------------------------------------------------+
 		; STANING
-		.byte $60, $0B, 00, $60    ; y = 70, tile number = B, Special attribute flags - palette = 00, x = 60
-		.byte $60, $0C, 00, $68    ; y = 70, tile number = C, Special attribute flags - palette = 00, x = 68
-		.byte $68, $0D, 01, $60    ; y = 78, tile number = D, Special attribute flags - palette = 00, x = 60
-		.byte $68, $0E, 01, $68    ; y = 78, tile number = E, Special attribute flags - palette = 00, x = 68
+		.byte $60, $0D, 00, $60    	; y = 60, tile number = 0D, Special attribute flags - palette = 00, x = 60
+		.byte $60, $0E, 00, $68    	; y = 60, tile number = 0E, Special attribute flags - palette = 00, x = 68
+		.byte $68, $0F, 01, $60    	; y = 68, tile number = 0F, Special attribute flags - palette = 01, x = 60
+		.byte $68, $10, 01, $68    	; y = 68, tile number = 10, Special attribute flags - palette = 01, x = 68
 		; JUMPING 1 
-		.byte $60, $0F, 00, $90    ; y = 70, tile number = 0F, Special attribute flags - palette = 00, x = 70
-		.byte $60, $10, 00, $98    ; y = 70, tile number = 10, Special attribute flags - palette = 00, x = 78
-		.byte $68, $11, 01, $90    ; y = 78, tile number = 11, Special attribute flags - palette = 00, x = 70
-		.byte $68, $12, 01, $98    ; y = 78, tile number = 12, Special attribute flags - palette = 00, x = 78
+		.byte $60, $11, 00, $70    	; y = 60, tile number = 11, Special attribute flags - palette = 00, x = 70
+		.byte $60, $12, 00, $78    	; y = 60, tile number = 12, Special attribute flags - palette = 00, x = 78
+		.byte $68, $13, 01, $70    	; y = 68, tile number = 13, Special attribute flags - palette = 01, x = 70
+		.byte $68, $14, 01, $78    	; y = 68, tile number = 14, Special attribute flags - palette = 01, x = 78
 		; JUMPING 2
-		.byte $70, $0F, 00, $60    ; y = 70, tile number = 0F, Special attribute flags - palette = 00, x = 80
-		.byte $70, $10, 00, $68    ; y = 70, tile number = 10, Special attribute flags - palette = 00, x = 88
-		.byte $78, $13, 01, $60    ; y = 78, tile number = 13, Special attribute flags - palette = 00, x = 80
-		.byte $78, $14, 01, $68    ; y = 78, tile number = 14, Special attribute flags - palette = 00, x = 88
+		.byte $60, $15, 00, $80    	; y = 60, tile number = 15, Special attribute flags - palette = 00, x = 80
+		.byte $60, $16, 00, $88    	; y = 60, tile number = 16, Special attribute flags - palette = 00, x = 88
+		.byte $68, $17, 01, $80    	; y = 68, tile number = 17, Special attribute flags - palette = 01, x = 80
+		.byte $68, $18, 01, $88    	; y = 68, tile number = 18, Special attribute flags - palette = 01, x = 88
 
-	; UP  -------------------------------------------------------------------------------------------
+	; UP  -----------------------------------------------------------------------------------------------------+
 		; STANDING
-		.byte $70, $15, 00, $70    ; y = 80, tile number = 15, Special attribute flags - palette = 00, x = 60
-		.byte $70, $16, 00, $78    ; y = 80, tile number = 16, Special attribute flags - palette = 00, x = 68
-		.byte $78, $17, 01, $70    ; y = 80, tile number = 17, Special attribute flags - palette = 01, x = 60
-		.byte $78, $18, 01, $78    ; y = 80, tile number = 18, Special attribute flags - palette = 01, x = 68
+		.byte $70, $19, 00, $60    	; y = 70, tile number = 19, Special attribute flags - palette = 00, x = 60
+		.byte $70, $1A, 00, $68    	; y = 70, tile number = 1A, Special attribute flags - palette = 00, x = 68
+		.byte $78, $1B, 01, $60    	; y = 70, tile number = 1B, Special attribute flags - palette = 01, x = 60
+		.byte $78, $1C, 01, $68    	; y = 70, tile number = 1C, Special attribute flags - palette = 01, x = 68
 		; JUMPING 1
-		.byte $70, $19, 00, $80    ; y = 80, tile number = 19, Special attribute flags - palette = 00, x = 70
-		.byte $70, $1A, 00, $88    ; y = 80, tile number = 1A, Special attribute flags - palette = 00, x = 78
-		.byte $78, $1B, 01, $80    ; y = 80, tile number = 1B, Special attribute flags - palette = 01, x = 70
-		.byte $78, $1C, 01, $88    ; y = 80, tile number = 1C, Special attribute flags - palette = 01, x = 78
-		; JUMPING 2
-		.byte $70, $19, 00, $90    ; y = 80, tile number = 19, Special attribute flags - palette = 00, x = 80
-		.byte $70, $1A, 00, $98    ; y = 80, tile number = 1A, Special attribute flags - palette = 00, x = 88
-		.byte $78, $1D, 01, $90    ; y = 80, tile number = 1D, Special attribute flags - palette = 01, x = 80
-		.byte $78, $1E, 01, $98    ; y = 80, tile number = 1E, Special attribute flags - palette = 01, x = 88
+		.byte $70, $1D, 00, $70    	; y = 70, tile number = 1D, Special attribute flags - palette = 00, x = 70
+		.byte $70, $1E, 00, $78    	; y = 70, tile number = 1E, Special attribute flags - palette = 00, x = 78
+		.byte $78, $1F, 01, $70    	; y = 70, tile number = 1F, Special attribute flags - palette = 01, x = 70
+		.byte $78, $20, 01, $78    	; y = 70, tile number = 20, Special attribute flags - palette = 01, x = 78
+		; JUMPING 2	
+		.byte $70, $21, 00, $80    	; y = 70, tile number = 21, Special attribute flags - palette = 00, x = 80
+		.byte $70, $22, 00, $88    	; y = 70, tile number = 22, Special attribute flags - palette = 00, x = 88
+		.byte $78, $23, 01, $80    	; y = 70, tile number = 23, Special attribute flags - palette = 01, x = 80
+		.byte $78, $24, 01, $88    	; y = 70, tile number = 24, Special attribute flags - palette = 01, x = 88
 
 .segment "CHARS"
 .incbin "graphics.chr"
