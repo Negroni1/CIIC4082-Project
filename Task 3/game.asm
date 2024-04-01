@@ -172,11 +172,14 @@ clear_loop:
     				STA frogDirection ; Set frogDirection to 0D (Down)
 						LDA #$01
 						STA hasMoved ; Set hasMoved to 1
-				
+					JMP update_done
+					
 				no_movement:
 						LDA #$00
 						STA hasMoved ; Set hasMoved to 0
 						STA directionOffSet
+						LDA #$0D
+						STA frogDirection
 
 		update_done:
     		JSR draw        ; Call Draw function to reflect changes
@@ -219,10 +222,10 @@ clear_loop:
 
 	updateAnimation:
     LDA tick
-    CMP #$1E               ; Compare tick to 30
-    BCC continue           ; If less than 30, skip to drawing the current frame
+    CMP #$0A               ; Compare tick to 10
+    BCC continue           ; If less than 10, skip to drawing the current frame
 
-    ; Animation state logic when tick >= 30
+    ; Animation state logic when tick >= 10
     LDA #$00
     STA tick               ; Reset tick
     LDA animationState
