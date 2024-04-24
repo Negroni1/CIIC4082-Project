@@ -40,6 +40,12 @@
 	LDA #$00
 	STA $2005
 	LDX #$00
+	
+	LDA level_change
+	CMP #$01
+	BNE continue
+	JSR drawBackground
+	continue:
     RTI                 ; Return from Interrupt
 .endproc
 
@@ -55,12 +61,12 @@
     STX $2001           ; PPUMASK = 0, disable rendering to the screen during startup
     STX $4010           ; 4010 = 0, turns off DMC IRQs, to ensure that we don’t draw random garbage to the screen
     BIT $2002
-vblankwait:             ; fetches the PPU’s status from PPUSTATUS, until PPU is ready
-    BIT $2002
-    BPL vblankwait
-vblankwait2:
-    BIT $2002
-    BPL vblankwait2
+	vblankwait:             ; fetches the PPU’s status from PPUSTATUS, until PPU is ready
+		BIT $2002
+		BPL vblankwait
+	vblankwait2:
+    	BIT $2002
+    	BPL vblankwait2
 
 	LDX #$00
 	STX temp
@@ -122,10 +128,10 @@ vblankwait2:
 	button_start:
 		LDA temp
 		AND #%00010000
+		BEQ continue
 		; TODO: CHAGE MAP
 		LDA level_change
-		CLC
-		ADC #$01
+		EOR #%01
 		STA level_change
 		
 
@@ -141,28 +147,37 @@ vblankwait2:
 	RTS						; Return from subroutine
 .endproc
 
-.proc main ; -------------------------------------------------------------------------+
-    LDX $2002           ; Load PPU Status into X
-
-    LDX #$3f            ; Load 3f into X
-    STX $2006           ; Store 3f in PPU Address
-    LDX #$00            ; Load 00 into X
-    STX $2006           ; Store 00 in PPU Address, such that we have 3f00 (the first color of the first palette) in PPU Address
-
-    ; WRITE PALETTES -----------------------------------------------------------------+
-    load_palettes:
-        LDA palettes, X     ; Load palettes into X
-        STA $2007           ; Store X into PPU data
-        INX                 ; Increase X
-        CPX #$18            ; Compare X, If X > 24 (6 patterns tables)
-        BNE load_palettes   ; 
-
-
+.proc drawBackground
+    ; Save register states to the stack
+    PHP
+    PHA
+    TXA
+    PHA
+    TYA
+    PHA
     ; WRITE BACKGROUND DATA ---------------------------------------------------------------+
-
+	LDX 00
+	STX background_tile_offset
 	; ; BACKGROUND 1 ----------------------------------------------------------------------+
 	; ; ; UPPER ---------------------------------------------------------------------------+
-	LDX 00
+	LDA level_change
+	CMP #$01
+	BNE bg
+	vblankwait_off:         ; wait for another vblank before continuing
+        BIT $2002       ; 2002 = PPU status
+        BPL vblankwait_off
+		LDA #%00000000  ; turn on NMIs, sprites use first pattern table
+		STA $2000       ; Store A in PPU Control
+		LDA #%00000000  ; turn on screen
+		STA $2001       ; Store A in PPU Mask
+
+		LDA #$20
+		STA background_offset_up
+		LDA #$00
+		STA background_offset_low
+
+	bg:
+	LDX #$00
 	STX background_tile_offset
 	background1:
 		LDA background_offset_up
@@ -174,7 +189,14 @@ vblankwait2:
 		LDX background_tile_offset
 		load_background1Upper:           	; Iterate through the BACKGROUND to draw UPPER TILES
 			; UPPER LEFT
+			LDA level_change
+			CMP #$01
+			BNE screen1_up
+			LDA background_screen3, X 
+			JMP screen1_con
+			screen1_up:
 			LDA background_screen1, X 
+			screen1_con:
 			STA $2007           			; Store X into PPUDATA
 			; UPPER RIGHT							; Lower Tiles Address
 			CLC
@@ -198,7 +220,14 @@ vblankwait2:
 		LDX background_tile_offset
 		load_background1_lower:           	; Iterate through the BACKGROUND to draw LOWER TILES
 			; LOWER LEFT
-			LDA background_screen1, X       ; Load the background tile into X
+			LDA level_change
+			CMP #$01
+			BNE screen1_low
+			LDA background_screen3, X 
+			JMP screen1_con_low
+			screen1_low:
+			LDA background_screen1, X 
+			screen1_con_low:
 			CLC
 			ADC #$02						; Sum 2 such that it takes the lower left
 			STA $2007           			; Store it into PPUDATA
@@ -256,7 +285,14 @@ vblankwait2:
 		LDX background_tile_offset
 		load_background2Upper:           	; Iterate through the BACKGROUND to draw UPPER TILES
 			; UPPER LEFT
+			LDA level_change
+			CMP #$01
+			BNE screen2_up
+			LDA background_screen3, X 
+			JMP screen2_con
+			screen2_up:
 			LDA background_screen2, X 
+			screen2_con:
 			STA $2007           			; Store X into PPUDATA
 			; UPPER RIGHT							; Lower Tiles Address
 			CLC
@@ -279,7 +315,14 @@ vblankwait2:
 		LDX background_tile_offset
 		load_background2_lower:           	; Iterate through the BACKGROUND to draw LOWER TILES
 			; LOWER LEFT
-			LDA background_screen2, X       ; Load the background tile into X
+			LDA level_change
+			CMP #$01
+			BNE screen2_low
+			LDA background_screen4, X 
+			JMP screen2_con_low
+			screen2_low:
+			LDA background_screen2, X 
+			screen2_con_low:
 			CLC
 			ADC #$02						; Sum 2 such that it takes the lower left
 			STA $2007           			; Store it into PPUDATA
@@ -333,12 +376,16 @@ vblankwait2:
 	LDA #$C0
 	STA $2006
 
-
-
-
 	LDX #$00
 	load_attribute: 
+		LDA level_change
+		CMP #$01
+		BNE attribute1
+		LDA attribute_screen3, X 
+		JMP attribute1_con
+		attribute1:
 		LDA attribute_screen1, X       			; Iterate through the attributes to draw them
+		attribute1_con:
 		STA $2007         				; Store X into PPUDATA
         INX                 			; Increase X
         CPX #$40            			; Compare X, If X > 192 (12 16bit sprites) stop the loop
@@ -352,7 +399,14 @@ vblankwait2:
 
 	LDX #$00
 	load_attribute2:           ; Iterate through the sprites to draw them
-		LDA attribute_screen2, X       ; Load the sprites into X
+		LDA level_change
+		CMP #$01
+		BNE attribute2
+		LDA attribute_screen4, X 
+		JMP attribute2_con
+		attribute2:
+		LDA attribute_screen2, X       			; Iterate through the attributes to draw them
+		attribute2_con:
         STA $2007         ; Store X into 0200
         INX                 ; Increase X
         CPX #$40            ; Compare X, If X > 192 (12 16bit sprites) stop the loop
@@ -365,7 +419,35 @@ vblankwait2:
 		STA $2000       ; Store A in PPU Control
 		LDA #%00011110  ; turn on screen
 		STA $2001       ; Store A in PPU Mask
+	LDA #$00
+	STA level_change
 
+	PLA
+    TAY
+    PLA
+    TAX
+    PLA
+    PLP
+    RTS
+.endproc
+
+.proc main ; -------------------------------------------------------------------------+
+    LDX $2002           ; Load PPU Status into X
+
+    LDX #$3f            ; Load 3f into X
+    STX $2006           ; Store 3f in PPU Address
+    LDX #$00            ; Load 00 into X
+    STX $2006           ; Store 00 in PPU Address, such that we have 3f00 (the first color of the first palette) in PPU Address
+
+    ; WRITE PALETTES -----------------------------------------------------------------+
+    load_palettes:
+        LDA palettes, X     ; Load palettes into X
+        STA $2007           ; Store X into PPU data
+        INX                 ; Increase X
+        CPX #$18            ; Compare X, If X > 24 (6 patterns tables)
+        BNE load_palettes   ; 
+
+	JSR drawBackground
     forever:
         JMP forever
 .endproc
@@ -403,67 +485,15 @@ attribute_screen2:
 	.byte $a2,$82,$82,$aa,$aa,$aa,$ee,$aa,$0a,$0a,$0a,$0f,$0f,$0f,$0f,$0f
 
 background_screen3:
-	.byte $13,$13,$20,$2d,$2e,$4d,$17,$1a,$1d,$21,$25,$28,$28,$28,$28,$28
-	.byte $1a,$1d,$21,$25,$28,$28,$28,$28,$1a,$1d,$21,$25,$28,$53,$4b,$3c
-	.byte $13,$13,$20,$2d,$2e,$4d,$18,$1b,$1e,$23,$26,$29,$29,$29,$29,$29
-	.byte $1b,$1e,$23,$26,$29,$29,$29,$29,$1b,$1e,$23,$26,$29,$54,$4b,$3c
-	.byte $13,$13,$20,$2d,$2e,$4d,$19,$1c,$1f,$24,$27,$2a,$2a,$2a,$2a,$2a
-	.byte $1c,$1f,$24,$27,$2a,$2a,$2a,$2a,$1c,$1f,$24,$27,$2a,$55,$4b,$3c
-	.byte $14,$15,$16,$2d,$2e,$2e,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30
-	.byte $30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$51,$4b,$3c
-	.byte $20,$17,$28,$2d,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$4b,$3c
-	.byte $20,$18,$29,$2d,$2e,$2e,$2e,$2e,$2e,$31,$31,$31,$31,$31,$31,$31
-	.byte $31,$31,$31,$31,$31,$31,$31,$31,$31,$31,$31,$2e,$2e,$4d,$4b,$13
-	.byte $20,$19,$2a,$2d,$2e,$2e,$2e,$2e,$4d,$4e,$33,$33,$33,$33,$33,$33
-	.byte $33,$33,$33,$33,$33,$33,$33,$33,$33,$33,$34,$2d,$2e,$4d,$4b,$13
-	.byte $20,$2c,$30,$2e,$2e,$2e,$2e,$2e,$4d,$4b,$13,$13,$13,$14,$15,$15
-	.byte $15,$15,$15,$15,$15,$15,$15,$15,$15,$56,$20,$2d,$2e,$4d,$4b,$13
-	.byte $20,$2d,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$4b,$13,$13,$13,$20,$17,$28
-	.byte $28,$1a,$1d,$21,$25,$28,$28,$28,$53,$4b,$20,$2d,$2e,$4d,$4b,$13
-	.byte $20,$2f,$31,$31,$31,$31,$2e,$2e,$4d,$4b,$13,$13,$13,$20,$18,$29
-	.byte $29,$1b,$1e,$23,$26,$29,$29,$29,$54,$4b,$20,$2d,$2e,$4d,$4c,$15
-	.byte $32,$33,$33,$33,$33,$34,$2d,$2e,$4d,$4b,$13,$13,$13,$20,$19,$2a
-	.byte $2a,$1c,$1f,$24,$27,$2a,$2a,$2a,$55,$4b,$20,$2d,$2e,$4d,$17,$28
-	.byte $3c,$3c,$3c,$3c,$3c,$20,$2d,$2e,$4d,$4b,$13,$13,$13,$20,$2c,$30
-	.byte $30,$30,$30,$30,$30,$30,$30,$30,$51,$4b,$20,$2d,$2e,$4d,$18,$29
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$4b,$13,$13,$13,$20,$2d,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$52,$16,$2d,$2e,$4d,$19,$2a
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$4b,$13,$13,$13,$20,$2d,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$35,$36,$36,$39,$2e,$2e,$30,$30
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$4b,$13,$13,$13,$20,$2d,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$38,$2b,$2b,$57,$2e,$2e,$2e,$2e
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$4b,$13,$13,$13,$20,$2d,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$37,$3b,$3b,$3a,$31,$31,$31,$31
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$4b,$13,$13,$13,$20,$2d,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$4e,$33,$33,$33,$33,$33,$33
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$52,$15,$15,$15,$16,$2d,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$17,$1a,$1d,$21,$25,$2d,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$18,$1b,$1e,$23,$26,$2d,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$19,$1c,$1f,$24,$27,$2d,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$2e,$30,$30,$30,$30,$30,$2e,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e
-	.byte $2e,$2e,$2e,$2e,$2e,$2e,$2e,$2e,$4d,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$2e,$31,$31,$31,$31,$31,$31,$31
-	.byte $31,$31,$31,$31,$31,$31,$31,$31,$50,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$4e,$33,$33,$33,$33,$33,$33
-	.byte $33,$33,$33,$33,$33,$33,$33,$33,$33,$4f,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2d,$2e,$4d,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$20,$2f,$31,$50,$4b,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$32,$33,$33,$33,$4f,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13
-	.byte $13,$3c,$13,$13,$13,$13,$13,$3c,$13,$13,$13,$13,$13,$13,$13,$13
-	.byte $13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13,$13
-	attribute_screen3:
+.byte $61, $65, $69, $6D, $79, $7D, $89, $89, $89, $89, $89, $79, $7D, $89, $91, $5D, $61, $65, $69, $71, $81, $85, $8D, $8D, $8D, $8D, $8D, $81, $85, $8D, $B1, $5D, $61, $65, $99, $75, $75, $75, $75, $75, $75, $75, $75, $75, $75, $A1, $B1, $5D, $61, $65, $99, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $99, $69, $B1, $5D, $61, $65, $69, $B9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $BD, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $C9, $89, $79, $7D, $89, $91, $61, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $61, $8D, $81, $85, $8D, $B1, $61, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $61, $CD, $75, $75, $A1, $B1, $61, $65, $69, $6D, $89, $61, $65, $69, $B1, $5D, $61, $65, $99, $99, $69, $D1, $D5, $65, $69, $71, $8D, $61, $65, $69, $B1, $5D, $61, $65, $99, $99, $69, $B1, $61, $65, $99, $75, $75, $61, $65, $69, $6D, $89, $C1, $65, $99, $99, $69, $B1, $61, $A5, $9D, $9D, $9D, $61, $65, $69, $71, $8D, $C5, $65, $99, $99, $69, $B1, $95, $A9, $A9, $A9, $A9, $61, $65, $99, $75, $75, $75, $99, $99, $99, $69, $B1, $5D, $5D, $5D, $5D, $5D, $61, $65, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $B5, $B1, $5D, $5D, $5D, $5D, $5D, $95, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $AD, $5D, $5D, $5D, $5D, $5D, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55
+attribute_screen3:
+	.byte $55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55
+	.byte $55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55
+	.byte $55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55
+	.byte $55,$55,$55,$55,$55,$55,$55,$55,$05,$05,$05,$05,$05,$05,$05,$05
+background_screen4:
+.byte $61, $65, $69, $6D, $79, $7D, $89, $89, $89, $89, $89, $79, $7D, $89, $91, $5D, $61, $65, $69, $71, $81, $85, $8D, $8D, $8D, $8D, $8D, $81, $85, $8D, $B1, $5D, $61, $65, $99, $75, $75, $75, $75, $75, $75, $75, $75, $75, $75, $A1, $B1, $5D, $61, $65, $99, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $99, $69, $B1, $5D, $61, $65, $69, $B9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $BD, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $C9, $89, $79, $7D, $89, $91, $61, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $61, $8D, $81, $85, $8D, $B1, $61, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $61, $CD, $75, $75, $A1, $B1, $61, $65, $69, $6D, $89, $61, $65, $69, $B1, $5D, $61, $65, $99, $99, $69, $D1, $D5, $65, $69, $71, $8D, $61, $65, $69, $B1, $5D, $61, $65, $99, $99, $69, $B1, $61, $65, $99, $75, $75, $61, $65, $69, $6D, $89, $C1, $65, $99, $99, $69, $B1, $61, $A5, $9D, $9D, $9D, $61, $65, $69, $71, $8D, $C5, $65, $99, $99, $69, $B1, $95, $A9, $A9, $A9, $A9, $61, $65, $99, $75, $75, $75, $99, $99, $99, $69, $B1, $5D, $5D, $5D, $5D, $5D, $61, $65, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $B5, $B1, $5D, $5D, $5D, $5D, $5D, $95, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $AD, $5D, $5D, $5D, $5D, $5D, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55
+attribute_screen4:
 	.byte $55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55
 	.byte $55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55
 	.byte $55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55
