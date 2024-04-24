@@ -37,8 +37,11 @@
 	
 	LDA #$00
   STA hasMoved        ; Reset hasMoved at the start of each frame
-	JSR update					; Call Update function         
+	JSR update					; Call Update function
 
+	LDA #$00            ; A = 0
+  STA $2005           ; PPU Scroll = 0
+  STA $2005           
   RTI                 ; Return from Interrupt
 .endproc
 
@@ -69,8 +72,6 @@
 	STA tick							; Set tick to 0
 	STA frogOffSet				; Set frog memory allocation offset to 0
 	STA directionOffSet		; Set frog direction offset to 0
-  STA $2005           ; PPU Scroll = 0
-  STA $2005  
   STA temp   						; Set temp to 0
   STA hasMoved  			 	; Set hasMoved to 0
 
@@ -119,7 +120,7 @@ clear_loop:
 
     		; Check Right (bit 7 of temp)
     		LDA temp
-   		 	AND #%00000001  ; Isolate Right button
+   		 	AND #%10000000  ; Isolate Right button
    		 	BEQ check_left  ; If 0, button not pressed, check next
     		LDA frogX
 				; Boundaries break animations when walked against
@@ -134,7 +135,7 @@ clear_loop:
 
 				check_left:
     				LDA temp
-    				AND #%00000010  ; Isolate Left button
+    				AND #%01000000  ; Isolate Left button
     				BEQ check_up    ; If 0, button not pressed, check next
     				LDA frogX
     				; CMP #$10        ; Assuming $10 as the left boundary to prevent underflow
@@ -147,7 +148,7 @@ clear_loop:
 
 				check_up:
     				LDA temp
-    				AND #%00001000  ; Isolate Up button
+    				AND #%00100000  ; Isolate Up button
     				BEQ check_down  ; If 0, button not pressed, check next
     				LDA frogY
     				; CMP #$10        ; Assuming $10 as the upper boundary to prevent underflow
@@ -161,7 +162,7 @@ clear_loop:
 
 				check_down:
     				LDA temp
-   				    AND #%00000100  ; Isolate Down button
+   				  AND #%00010000  ; Isolate Down button
     				BEQ no_movement ; If 0, button not pressed, no movement was done
     				LDA frogY
     				; CMP #$D0        ; 224 - Maximum Y value before moving off-screen downwards
@@ -389,8 +390,8 @@ clear_loop:
 		.byte $2B, $1C, $2C, $3C    ; green blue, blue, light blue
 		.byte $2B, $1C, $17, $3A    ; green blue, brown, light green
 		; SPRITE PALETTE  --------------------------------------------------------------+
-		.byte $2B, $0f, $3A, $20    ; green, black, green, white
-		.byte $2B, $0f, $1B, $3B    ; green, black, green, green
+		.byte $2C, $0f, $28, $20    ; green, black, green, white
+		.byte $2C, $0f, $18, $3B    ; green, black, green, green
 
 .segment "CHARS"
 .incbin "graphics.chr"
