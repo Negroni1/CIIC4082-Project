@@ -112,6 +112,8 @@
 	AND #%00000001  ; Isolate Right button
 	BEQ arrow_left  ; If 0, button not pressed, check next
 	LDA scroll_offset
+	CMP #$FF
+	BEQ continue
 	CLC
 	ADC #$01
 	STA scroll_offset
@@ -122,6 +124,8 @@
 		AND #%00000010  ; Isolate Left button
 		BEQ button_start    ; If 0, button not pressed, check next
 		LDA scroll_offset
+		CMP #$00
+		BEQ continue
 		DEC scroll_offset
 		JMP continue
 
