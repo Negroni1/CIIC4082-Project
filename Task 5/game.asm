@@ -25,38 +25,23 @@
 	tileX:	.res 1
 	tileY:	.res 1
 	TileIndex: .res 1
-	Tile: .res 1
-	tileDataPtr: .res 2
-	chrTilePtr: .res 2
+	PPULow: .res 1
+	PPUHigh: .res 1
+	temp: .res 1
+	isMoving: .res 1
+	scroll_temp: .res 1
+	tempFrogX: .res 1
+	tempFrogY: .res 1
+	; chrTilePtr: .res 2
+
+; .segment "BSS"
+; 	tileDataStart: .res 16 ; Reserve 16 bytes for tile data
 
 .segment "STARTUP"
 
 .segment "CODE"
 .proc irq_handler       ; IRQ (Interrup Request) can be triggered by the NES’ sound processor or from certain types of cartridge hardware.
     RTI                 ; Return from Interrupt
-.endproc
-
-.proc nmi_handler       ; NMI (“Non-Maskable Interrupt”) occurs when the PPU starts preparing the next frame of graphics, 60 times per second.
-	LDA #$00            ; Load 00 into A
-  STA $2003           ; Store 00 into the OAM Address, is used to set where in OAM we want to write to; for all of our projects (and for most commercial games), this will always be $00, the beginning of the OAM block
-                      ; This tells the PPU to prepare for a transfer to OAM starting at byte zero
-  LDA #$02            ; Load 02 into A
-  STA $4014           ; Store 02 into OAMDMA, initiates the transfer of an entire page of memory into OAM
-                      ; This tells the PPU to initiate a high-speed transfer of the 256 bytes from $0200-$02ff into OAM
-
-  JSR ClearSprites    ; Call ClearSprites to clear sprite data at the beginning of the frame
-	
-	LDA #$00
-  STA hasMoved        ; Reset hasMoved at the start of each frame
-	JSR update					; Call Update function         
-
-	LDA scroll_offset
-	STA $2005
-	LDA #$00
-	STA $2005
-	LDX #$00
-
-  RTI                 ; Return from Interrupt
 .endproc
 
 .proc reset_handler     ; Set up the system when it is first turned on
@@ -86,11 +71,14 @@
 	LDA #$80							; A = 136
 	STA frogY							; Set frog Y to 136
 
+	LDA $2002
+
 	LDA #$00							; A = 0
 	STA animationState		; Set animation state to 0
 	STA tick							; Set tick to 0
 	STA frogOffSet				; Set frog memory allocation offset to 0
 	; STA directionOffSet		; Set frog direction offset to 0
+	STA scroll_offset
   STA $2005           ; PPU Scroll = 0
   STA $2005  
   STA controllerInput   						; Set controllerInput to 0
@@ -98,14 +86,14 @@
 	STA tileX
 	STA tileY
 	STA TileIndex
-  STA chrTilePtr        ; Low byte of CHR tile pointer
-  STA tileDataPtr       ; Low byte of RAM tile data pointer
+  ; STA chrTilePtr        ; Low byte of CHR tile pointer
+  ; STA tileDataPtr       ; Low byte of RAM tile data pointer
 
-  LDA #$10
-  STA chrTilePtr+1      ; High byte of CHR tile pointer ($1000)
+  ; LDA #$10
+  ; STA chrTilePtr+1      ; High byte of CHR tile pointer ($1000)
 
-  LDA #$03
-  STA tileDataPtr+1     ; High byte of RAM tile data pointer ($0300)
+  ; LDA #$03
+  ; STA tileDataPtr+1     ; High byte of RAM tile data pointer ($0300)
 	
 	LDA #$20
 	STA background_offset_up
@@ -114,6 +102,28 @@
 	STA frogDirection   	; Set frog Direction to Right (25)
 
   JMP main							; Go to main
+.endproc
+
+.proc nmi_handler       ; NMI (“Non-Maskable Interrupt”) occurs when the PPU starts preparing the next frame of graphics, 60 times per second.
+	LDA isMoving
+	CMP #$00
+	JMP handler
+	RTI
+	handler:
+	; Initialize OAM for DMA transfer
+	LDA #$00
+	STA $2003           ; Set OAM start address for DMA
+	LDA #$02
+	STA $4014           ; Start DMA transfer from $0200-$02FF to OAM
+
+  JSR ClearSprites    ; Call ClearSprites to clear sprite data at the beginning of the frame
+	
+	LDA #$00
+  STA hasMoved        ; Reset hasMoved at the start of each frame
+
+	JSR update					; Call Update function         
+
+  RTI                 ; Return from Interrupt
 .endproc
 
 .proc ClearSprites
@@ -139,143 +149,169 @@
 	TYA						; Transfer Y into the Accumulator
 	PHA						; Push Y (the accumulator register) onto the stack
 
-    LDA tick    ; Load tick
-    CLC         ; Clear carry flag
-    ADC #$01    ; Add 1 to tick
-    STA tick    ; Store new tick
+	LDA tick    ; Load tick
+	CLC         ; Clear carry flag
+	ADC #$01    ; Add 1 to tick
+	STA tick    ; Store new tick
 
-		; Ensure VBlank has started
-	WaitVBlank:
-    BIT $2002               ; Read PPU status to reset the address latch
-    BPL WaitVBlank          ; Loop until VBlank starts (bit 7 is set)
+	LDA #$00
+	STA tileX
+	STA tileY
+	STA TileIndex
 
-    LDA $4016   ; Read controller 1
-    STA controllerInput    ; Store state in controllerInput variable
-    LDA #$01
-    STA $4016   ; Strobe controller
-    LDA #$00
-    STA $4016   ; Clear strobe, begin reading button states
+	LDA #$01
+	STA isMoving
 
-    LDY #$08    ; Prepare to read 8 buttons
-    LDA #$00    ; Clear A to start
+	; Read and process controller input
+	LDA $4016   ; Read controller 1
+	STA controllerInput    ; Store state in controllerInput variable
+	LDA #$01
+	STA $4016   ; Strobe controller
+	LDA #$00
+	STA $4016   ; Clear strobe, begin reading button states
 
-		read_buttons:
-    		LDA $4016       ; Read button state
-    		LSR             ; Shift right, moving the button's state into carry
-    		ROL controllerInput        ; Rotate Left through Carry to move button state into controllerInput
-    		DEY
-    		BNE read_buttons
+	LDY #$08    ; Prepare to read 8 buttons
+	LDA #$00    ; Clear A to start
 
-    		; Check Right (bit 7 of controllerInput)
-    		LDA controllerInput
-   		 	AND #%00000001  ; Isolate Right button
-   		 	BEQ check_left  ; If 0, button not pressed, check next
-    		
-    		LDA #$25
-    		STA frogDirection ; Set frogDirection to 25 (Right)
+	read_buttons:
+			LDA $4016       ; Read button state
+			LSR             ; Shift right, moving the button's state into carry
+			ROL controllerInput        ; Rotate Left through Carry to move button state into controllerInput
+			DEY
+			BNE read_buttons
+
+			; Check Right
+			LDA controllerInput
+			AND #%00000001  ; Isolate Right button
+			BEQ check_left  ; If not pressed, check next
+			
+			LDA #$25
+			STA frogDirection ; Set frogDirection to 25 (Right)
+
+			JSR checkWalkable
+			CMP #$00
+			BEQ near_done
+
+			LDA frogX
+			CMP #$F8
+			BEQ SkipIncrementRight
+			INC frogX       ; Move right
+			
+			SkipIncrementRight:
+				LDA #$01
+				STA hasMoved ; Set hasMoved to 1
+
+				LDA scroll_temp
+				STA scroll_offset
+				JMP update_done
+
+				JMP update_done
+
+			check_left:
+				LDA controllerInput
+				AND #%00000010  ; Isolate Left button
+				BEQ check_up    ; If 0, button not pressed, check next
+				
+				LDA #$01
+				STA frogDirection ; Set frogDirection to 01 (Left)
 
 				JSR checkWalkable
 				CMP #$00
 				BEQ near_done
 
 				LDA frogX
-				CMP #$F8
-				BEQ SkipIncrementRight
-    		INC frogX       ; Move right
-				
-				SkipIncrementRight:
+				CMP #$00
+				BEQ SkipDecrementLeft
+				DEC frogX       ; Move left
+					
+				SkipDecrementLeft:
 				LDA #$01
 				STA hasMoved ; Set hasMoved to 1
 
-    		JMP update_done
+				LDA scroll_temp
+				STA scroll_offset
+				JMP update_done
 
-				check_left:
-    				LDA controllerInput
-    				AND #%00000010  ; Isolate Left button
-    				BEQ check_up    ; If 0, button not pressed, check next
-    				
-						LDA #$01
-						STA frogDirection ; Set frogDirection to 01 (Left)
+			check_up:
+				LDA controllerInput
+				AND #%00001000  ; Isolate Up button
+				BEQ check_down  ; If 0, button not pressed, check next
+				
+				LDA #$19
+				STA frogDirection ; Set frogDirection to 19 (Up)
 
-						JSR checkWalkable
-						CMP #$00
-						BEQ update_done
+				JSR checkWalkable
+				CMP #$00
+				BEQ update_done
 
-						LDA frogX
-						CMP #$00
-						BEQ SkipDecrementLeft
-    				DEC frogX       ; Move left
-						
-						SkipDecrementLeft:
-						LDA #$01
-						STA hasMoved ; Set hasMoved to 1
+				LDA frogY
+				CMP #$00
+				BEQ SkipDecrementUp
+				DEC frogY       ; Move up
 
-    				JMP update_done
+				SkipDecrementUp:
+				LDA #$01
+				STA hasMoved ; Set hasMoved to 1
 
-				check_up:
-    				LDA controllerInput
-    				AND #%00001000  ; Isolate Up button
-    				BEQ check_down  ; If 0, button not pressed, check next
-    				
-						LDA #$19
-    				STA frogDirection ; Set frogDirection to 19 (Up)
+				JMP update_done
 
-						JSR checkWalkable
-						CMP #$00
-						BEQ update_done
+			near_done:
+				JMP update_done
 
-						LDA frogY
-						CMP #$00
-						BEQ SkipDecrementUp
-    				DEC frogY       ; Move up
+			check_down:
+				LDA controllerInput
+				AND #%00000100  ; Isolate Down button
+				BEQ no_movement ; If also 0, no relevant button not pressed, no movement was done
+				
+				LDA #$0D
+				STA frogDirection ; Set frogDirection to 0D (Down)
 
-						SkipDecrementUp:
-						LDA #$01
-						STA hasMoved ; Set hasMoved to 1
+				JSR checkWalkable
+				CMP #$00
+				BEQ update_done
 
-    				JMP update_done
+				LDA frogY
+				CMP #$E8
+				BEQ SkipIncrementDown
+				INC frogY       ; Move down
 
-				near_done:
+				SkipIncrementDown:
+				LDA #$01
+				STA hasMoved ; Set hasMoved to 1
+				
+				JMP update_done
+				
+			no_movement:
+					LDA #$00
+					STA hasMoved ; Set hasMoved to 0
+					STA tileX
+					STA tileY
+					STA TileIndex
+					LDA #$0D
+					STA frogDirection
 					JMP update_done
 
-				check_down:
-    				LDA controllerInput
-   				  AND #%00000100  ; Isolate Down button
-    				BEQ no_movement ; If 0, button not pressed, no movement was done
-    				
-    				LDA #$0D
-    				STA frogDirection ; Set frogDirection to 0D (Down)
-
-						JSR checkWalkable
-						CMP #$00
-						BEQ update_done
-
-						LDA frogY
-						CMP #$E8
-						BEQ SkipIncrementDown
-    				INC frogY       ; Move down
-
-						SkipIncrementDown:
-						LDA #$01
-						STA hasMoved ; Set hasMoved to 1
-						
-						JMP update_done
-					
-				no_movement:
-						LDA #$00
-						STA hasMoved ; Set hasMoved to 0
-						; STA directionOffSet
-						LDA #$0D
-						STA frogDirection
-						JMP update_done					
-
 		update_done:
+				LDA #$00
+				STA isMoving
     		JSR draw        ; Call Draw function to reflect changes
   
 	; Wait for VBlank to end before restoring registers (prevents changes during rendering)
 	WaitEndVBlank:
     BIT $2002
     BMI WaitEndVBlank      ; Wait until VBlank is over
+
+			LDA $2002
+
+			LDA scroll_offset
+			STA $2005
+			LDA #$00
+			STA $2005
+			LDX #$00
+
+			; LDA #$00
+			; STA $2006  ; Reset PPU address high byte
+			; STA $2006  ; Reset PPU address low byte
 
 	; RESTORE REGISTERS & RETURN
 	PLA						; Pull Y of the stack and place it into the accumulator	register
@@ -295,59 +331,69 @@
 	PHA						; Push X (the accumulator register) onto the stack
 	TYA						; Transfer Y into the Accumulator
 	PHA						; Push Y (the accumulator register) onto the stack
-
-;	Directional Branching
+	
 	LDA frogX
-	STA tileX
+	STA tempFrogX
 	LDA frogY
-	STA tileY
+	STA tempFrogY
+	LDA scroll_offset
+	STA scroll_temp
 
+	;	Directional Branching
 	LDA frogDirection
 	CMP #$01
 	BEQ Left_Tile
+	
+	LDA frogDirection
 	CMP #$0D
 	BEQ Down_Tile
+
+	LDA frogDirection
 	CMP #$19
 	BEQ Up_Tile
+	
+	LDA frogDirection
 	CMP #$25
 	BEQ Right_Tile
-	JMP Calculate_Index
+	JMP NearExit
 
 	Left_Tile:
-			LDA frogX
-			CMP #$00
-			BEQ NearExit    ; Exit if at boundary
+			LDA tempFrogX
+			; CMP #$00
+			; BEQ NearExit    ; Exit if at boundary
 			SEC         ; Set carry for subtraction
-			SBC #$01    ; Decrement frogX
-			STA tileX
+			SBC #$20    ; Decrement frogX
+			STA tempFrogX
 			JMP HandleScrollDecrement
 
 	Right_Tile:
-			LDA frogX
+			LDA tempFrogX
 			CMP #$F8    ; Check if frogX is less than 248
 			BEQ NearExit
 			CLC         ; Clear carry for addition
-			ADC #$01    ; Increment frogX
-			STA tileX
+			ADC #$08    ; Increment frogX
+			STA tempFrogX
 			JMP HandleScrollIncrement
 
 	Up_Tile:
-			LDA frogY
-			CMP #$00
-			BEQ Exit
+			LDA tempFrogY
+			CMP #$08
+			BEQ NearExit
 			SEC         ; Set carry for subtraction
-			SBC #$01    ; Decrement frogY
-			STA tileY
-			JMP Calculate_Index  ; Only need to recalculate indexes
+			SBC #$08    ; Decrement frogY
+			STA tempFrogY
+			JSR Calculate_Index  ; Only need to recalculate indexes
+			JMP NearExit
 
 	Down_Tile:
-			LDA frogY
+			LDA tempFrogY
 			CMP #$E8    ; Check if frogY is less than 232
-			BEQ Exit
+			BEQ NearExit
 			CLC         ; Clear carry for addition
-			ADC #$01    ; Increment frogY
-			STA tileY
-			JMP Calculate_Index  ; Only need to recalculate indexes
+			ADC #$08    ; Increment frogY
+			STA tempFrogY
+			JSR Calculate_Index  ; Only need to recalculate indexes
+			JMP NearExit
 
 	NearExit:
 			JMP Exit  ; Use unconditional jump to reach the actual exit point
@@ -358,10 +404,10 @@
     BEQ SkipDecrement  ; Skip if decrementing leads to underflow
     SEC         ; Set carry for subtraction
     SBC #$01    ; Decrement scroll_offset
-    STA scroll_offset    ; Update the global state if everything is fine
-    JMP Calculate_Index  ; Use the updated value for calculation
+    STA scroll_temp    ; Update the temporal state if everything is fine
 	SkipDecrement:
-    JMP Exit
+    JSR Calculate_Index  ; Use the updated value for calculation
+		JMP Exit
 
 	HandleScrollIncrement:
     LDA scroll_offset
@@ -369,50 +415,155 @@
     BEQ SkipIncrement  ; Skip if incrementing leads to overflow
     CLC         ; Clear carry for addition
     ADC #$01    ; Increment scroll_offset
-    STA scroll_offset    ; Update the global state if everything is fine
-    JMP Calculate_Index  ; Use the updated value for calculation
+		STA temp
+    STA scroll_temp    ; Update the temporal state if everything is fine
 	SkipIncrement:
-    JMP Exit
+    JSR Calculate_Index  ; Use the updated value for calculation
+		JMP Exit
 
 	Calculate_Index:
-			; [Adjust tileX with the horizontal scroll offset]
-			LDA tileX
-			CLC
-			ADC scroll_offset
-			STA tileX
 
-			; [Tile Coordinate Calculation]
-			LSR A
-			LSR A
-			LSR A
-			STA tileX
-			LDA tileY
-			LSR A
-			LSR A
-			LSR A
-			STA tileY
+		LDA scroll_temp
+    LSR A
+    LSR A
+    LSR A
+		STA temp
 
-			; [PPU Address Calculation]
-			LDA tileY
-			ASL A
-			ASL A
-			ASL A
-			STA $00
+    LDA tempFrogX
+    CLC
+    ; ADC $00
+    ; ADC scroll_offset
+    LSR A
+    LSR A
+    LSR A
+		CLC
+		ADC temp
+    STA tileX
 
-			LDA tileX
-			CLC
-			ADC $00
-			STA $2006
-			LDA #$20
-			ADC #0
-			STA $2006+1
+    LDA tempFrogY
+    CLC
+    ADC #$08
+    LSR A
+    LSR A
+    LSR A
+    STA tileY
 
-			; [Read Tile Index]
+		; Wrap TileX within 0 to 31
+    LDA tileX
+    AND #$1F       ; Wrap around if exceeded 31
+    STA tileX
+
+    ; Ensure TileY is within 0 to 29
+    LDA tileY
+    CMP #$1E       ; Compare with 30
+    BCC TileYOK    ; If less than 30, it's OK
+    LDA #$1D       ; Set to 29 if exceeded
+
+		TileYOK:
+    STA tileY
+
+    JSR Calculate_Next_Tile
+    RTS
+
+	Calculate_Next_Tile:
+    ; Load tileY into $00 and set $01 to zero to start
+    LDA tileY
+    STA $00    ; $00 will hold the low byte of the result
+    LDA #$00
+    STA $01    ; $01 will hold the high byte of the result
+
+    ; We need to add tileY to itself 5 times (tileY * 32 = tileY * (2^5))
+    LDY #$05   ; Set the loop counter to 5 for the number of additions needed
+
+		; LDA scroll_offset
+		; SEC
+		; SBC $80
+		; BMI multiply_loop
+
+		; DEY
+
+		multiply_loop:
+    CLC        ; Clear carry before addition
+    LDA $00
+    ADC $00    ; Add $00 to itself (low byte)
+    STA $00    ; Store back the result into $00
+    LDA $01
+    ADC $01    ; Add $01 to itself (high byte), with carry from low byte addition
+    STA $01    ; Store back the result into $01
+
+    DEY        ; Decrement the loop counter
+    BNE multiply_loop  ; If Y is not zero, repeat the loop
+
+    ; At this point, $00 and $01 contain the result of tileY * 32 or tileY * 16, depending on offset
+    ; $00 holds the low byte, $01 holds the high byte
+		LDA $01
+		STA PPUHigh
+		LDA $00
+		STA PPULow
+
+		; Prepare the high byte of the PPU address
+    LDA PPUHigh       ; Start with the base address high byte $20 (for $2000)
+    CLC
+		ADC #$20
+    STA PPUHigh        ; Store adjusted high byte of PPU address
+
+		; Prepare the low byte of the PPU address
+    LDA PPULow       ; Start with the base address high byte $20 (for $2000)
+    CLC
+		ADC tileX
+    STA PPULow        ; Store adjusted high byte of PPU address
+
+		; Ensure we're in VBlank to safely set PPU addresses and read data
+    ; waitForVBlank:
+    ;   BIT $2002
+    ;   BPL waitForVBlank
+		
+		; Sometimes the result could be affected by other changes
+		; therefore, repeat the calculation until we get a valid value
+		Read_Loop:
+			LDA $2002
+			LDA PPUHigh
+			STA $2006          ; Set high byte of PPU address
+			LDA PPULow
+			STA $2006          ; Set low byte of PPU address
+
+			LDA $2002
+			LDA $2007				 ; The first read from $2007 is invalid
 			LDA $2007
 			STA TileIndex
 
+			LDA TileIndex
+			CMP #$FF
+			BEQ Read_Loop
+			
+			LDA TileIndex
+			CMP #$00
+			BEQ Read_Loop
+
+			LDA $2002
+
+			LDA scroll_offset
+			STA $2005
+			LDA #$00
+			STA $2005
+		RTS
+
 	Exit:
     ; [Restore Registers]
+		LDA #$00
+		STA PPUHigh
+		STA PPULow
+    STA $2006          ; Set high byte of PPU address
+    STA $2006          ; Set low byte of PPU address
+
+		LDA scroll_offset
+		STA $2005
+		LDA #$00
+		STA $2005
+
+		LDA #$00
+		STA isMoving
+
     PLA
     TAY
     PLA
@@ -421,193 +572,12 @@
     PLP
     RTS
 .endproc
-	; ; Move Left
-	; Left_Tile:
-	; 	LDA frogX
-  ;   CMP #$00     ; Check if frogX is greater than 0
-  ;   BEQ SkipDecrementLeft ; Skip decrement if at boundary
-  ;   SEC
-  ;   SBC #$01
-	; 	SkipDecrementLeft:
-  ;   	STA tileX
-	; 	STA tileX  ; Store the result in tileX
-
-	; 	LDA frogY
-	; 	STA tileY  ; Copy Y as is
-
-	; 	LDA scroll_offset
-	; 	CMP #$00     ; Check if frogX is greater than 0
-  ;   BEQ SkipOffsetDecrement ; Skip decrement if at boundary
-	; 	DEC scroll_offset
-	; 	JSR Calculate_Index
-	; 	LDA scroll_offset
-	; 	INC scroll_offset
-
-	; 	SkipOffsetDecrement:
-	; 		JSR Calculate_Index
-
-	; 	JMP Exit
-
-	; ; Move Down
-	; Down_Tile:
-	; 		LDA frogY
-	; 		CMP #$00     ; Check if frogX is greater than 0
-  ;  		BEQ SkipIncrementDown ; Skip decrement if at boundary
-	; 		CLC        ; Clear carry for addition
-	; 		ADC #$01   ; Add 1 to A, considering carry
-	; 		SkipIncrementDown:
-  ;   		STA tileY
-	; 		STA tileY  ; Store the result in tileY
-	; 		LDA frogX
-	; 		STA tileX  ; Copy X as is
-	; 		JSR Calculate_Index
-	; 		JMP Exit
-
-	; ; Move Up
-	; Up_Tile:
-	; 		LDA frogY
-	; 		CMP #$E8     ; Check if frogX is lower than 232 (29 tiles)
-  ;   	BEQ SkipDecrementUp ; Skip decrement if at boundary
-	; 		SEC        ; Set carry for subtraction
-	; 		SBC #$01   ; Subtract 1 from A, considering carry
-	; 		SkipDecrementUp:
-  ;   		STA tileY
-	; 		STA tileY  ; Store the result in tileY
-	; 		LDA frogX
-	; 		STA tileX  ; Copy X as is
-	; 		JSR Calculate_Index
-	; 		JMP Exit
-
-	; ; Move Right
-	; Right_Tile:
-	; 		LDA frogX
-	; 		CMP #$F8     ; Check if frogX is lower than 248
-  ;   	BEQ SkipIncrementRight ; Skip decrement if at boundary
-	; 		CLC        ; Clear carry for addition
-	; 		ADC #$01   ; Add 1 to A, considering carry
-
-	; 		SkipIncrementRight:
-  ;   		STA tileY
-	; 		STA tileX  ; Store the result in tileX
-	; 		LDA frogY
-	; 		STA tileY  ; Copy Y as is
-
-	; 		LDA scroll_offset
-	; 		CMP #$FF     ; Check if scroll_offset is greater than 256
-  ;   	BEQ SkipOffsetIncrement ; Skip decrement if at boundary
-	; 		INC scroll_offset
-	; 		JSR Calculate_Index
-	; 		LDA scroll_offset
-	; 		DEC scroll_offset
-
-	; 		SkipOffsetIncrement:
-	; 			JSR Calculate_Index
-	; 		JMP Exit
-
-	; Calculate_Index:
-	; 		; Adjust tileX with the horizontal scroll offset
-	; 		LDA tileX
-	; 		CLC
-	; 		ADC scroll_offset      ; Add scroll offset to tileX
-	; 		STA tileX              ; Store back to tileX
-
-	; 		; Convert X to tile coordinate
-	; 		LSR A
-	; 		LSR A
-	; 		LSR A                 ; tileX / 8 to get the tile X coordinate
-	; 		STA tileX
-
-	; 		; Convert Y to tile coordinate
-	; 		LDA tileY
-	; 		LSR A
-	; 		LSR A
-	; 		LSR A                 ; tileY / 8 to get the tile Y coordinate
-	; 		STA tileY
-
-	; 		; Calculate Name Table address
-	; 		; $2000 is the start of the Name Table
-	; 		LDA tileY
-	; 		ASL A
-	; 		ASL A
-	; 		ASL A                 ; TileY * 8 (row offset in Name Table)
-	; 		STA $00               ; Store temporarily in zero-page address $00
-
-	; 		LDA tileX
-	; 		CLC
-	; 		ADC $00               ; Add TileY * 8 (from $00) and TileX
-	; 		STA tileX             ; Store result back to tileX for further calculation
-
-	; 		; Assume $2000 is already set in the high byte, need to adjust the actual address
-	; 		LDA tileX
-	; 		CLC
-	; 		ADC #$00              ; Adjust low byte of address if necessary due to addition carry
-	; 		STA $2006             ; Store the lower byte of address
-
-	; 		LDA #$20              ; High byte of the base name table address
-	; 		ADC #0                ; Add carry from previous addition
-	; 		STA $2006+1           ; Store the upper byte of address
-
-
-	; 		; Set the PPU Address to read
-	; 		LDA 2006+1
-	; 		STA $2006
-	; 		LDA 2006
-	; 		STA $2006
-
-	; 		; Read the tile index from PPU Data port
-	; 		LDA $2007       ; First read after setting address gets the tile index
-	; 		STA TileIndex
-	; 		RTS
-
-	; Exit:
-	; 	; RESTORE REGISTERS & RETURN
-	; 	PLA						; Pull Y of the stack and place it into the accumulator	register
-	; 	TAY						; Restore/Transfer the accumulator into Y
-	; 	PLA						; Pull X of the stack and place it into the accumulator	register
-	; 	TAX						; Restore/Transfer the accumulator into X
-	; 	PLA						; Pull the top value of the stack and place it into the accumulator register
-	; 	PLP						; Pull the top value of the stack and place it into the  processor status register
-	; 	RTS						; Return from subroutine
-; .endproc
 
 .proc checkWalkable ; ------------------------------------------------------------------------------------------+
 	JSR readTile
-
-	; Now, TileIndex needs to be compared with each tile in the CHR ROM
-	LDX #0            ; X will index each tile in the CHR file, starting at $1000
-	FindTileLoop:
-		; Point to the next tile in CHR ROM (16 bytes per tile)
-		LDA #$10
-		STA chrTilePtr+1  ; High byte of CHR base address
-		TXA
-		CLC
-		ADC #$00          ; Low byte start at $1000, offset by X
-		STA chrTilePtr    ; Set low byte of CHR tile pointer
-
-		LDY #$00          ; Y will index each byte within a tile
-	CompareTileData:
-		; Assuming we have fetched the tile data from PPU to a RAM location pointed by tileDataPtr
-		LDA (tileDataPtr), Y  ; Load byte from RAM tile data
-		CMP (chrTilePtr), Y   ; Compare with byte from CHR tile data
-		BEQ NextByte          ; If match, check next byte
-		INX
-		CPX #$F0             ; Check 240 tiles (assuming tiles go from $1000 to $1FF0)
-		BNE FindTileLoop     ; Continue if not all tiles checked
-		JMP TileNotFound
-
-	NextByte:
-		INY
-		CPY #$10             ; 16 bytes per tile
-		BNE CompareTileData  ; If not all bytes checked, keep comparing
-		; All bytes match, tile found
-		STX TileIndex   ; Store the index of the matching tile
-		JMP FoundTile
+	JMP CheckWalkable
 
 	FoundTile:
-		LDA TileIndex
-		AND #%00001111  			; Isolate Tile Index in CHR
-		STA TileIndex
-		JSR CheckWalkable
 		LDA #$01 							; Return 1
 		RTS
 
@@ -624,6 +594,7 @@
 			BEQ FoundTile  			; Branch if it is a walkable tile
 			INX
 			JMP CheckWalkable
+			
 .endproc
 
 .proc draw ; ------------------------------------------------------------------------------------------+
@@ -634,6 +605,10 @@
 	PHA						; Push X (the accumulator register) onto the stack
 	TYA						; Transfer Y into the Accumulator
 	PHA						; Push Y (the accumulator register) onto the stack
+
+	; vblankwait:           ; fetches the PPU’s status from PPUSTATUS, until PPU is ready
+	; 	BIT $2002
+	; 	BPL vblankwait
 
 	JSR drawAnimation		; Call drawAnimation
 
@@ -704,7 +679,6 @@
     RTS
 .endproc
 
-
 .proc drawFrog	; ------------------------------------------------------------------------------------------+
 	; SAVE REGISTER INTO THE STACK
 	PHP						; Push the Processor Status Register onto the stack
@@ -714,10 +688,10 @@
 	TYA						; Transfer Y into the Accumulator
 	PHA						; Push Y (the accumulator register) onto the stack
 
-	LDA frogDirection
+	; LDA frogDirection
 	; CLC
 	; ADC directionOffSet
-	STA frogDirection		; Add direction offset to the frog direction
+	; STA frogDirection		; Add direction offset to the frog direction
 
 	LDX frogOffSet			; Load frog offset to X
 
@@ -1065,6 +1039,11 @@
 		STA $2001       ; Store A in PPU Mask
 	LDA #$00
 	STA level_change
+	
+	LDA scroll_offset
+	STA $2005
+	LDA #$00
+	STA $2005
 
 	PLA
     TAY
@@ -1089,6 +1068,13 @@
         INX                 ; Increase X
         CPX #$18            ; Compare X, If X > 24 (6 patterns tables)
         BNE load_palettes   ;
+		
+		lda #$3F
+  	sta $2006
+  	lda #0
+  	sta $2006
+  	sta $2006
+  	sta $2006
 
 		JSR drawBackground	; Call drawBackground
 
@@ -1121,7 +1107,7 @@
 		.byte $2C, $00, $00, $00
 
 background_screen1:
-	.byte $05, $09, $09, $09, $09, $09, $09, $09, $09, $09, $0D, $01, $05, $09, $09, $0D, $11, $1D, $1D, $1D, $15, $1D, $1D, $1D, $1D, $15, $19, $01, $11, $15, $15, $19, $11, $1D, $15, $1D, $1D, $1D, $15, $1D, $1D, $1D, $19, $01, $11, $15, $15, $19, $21, $25, $29, $1D, $2D, $25, $25, $25, $29, $1D, $19, $01, $11, $15, $15, $19, $45, $01, $11, $1D, $19, $01, $05, $09, $35, $1D, $39, $09, $35, $15, $15, $19, $01, $53, $11, $1D, $19, $01, $11, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $01, $01, $11, $1D, $19, $01, $11, $1D, $2D, $25, $29, $1D, $2D, $25, $25, $31, $09, $09, $35, $1D, $19, $01, $11, $1D, $19, $3D, $11, $1D, $19, $01, $01, $01, $1D, $1D, $1D, $1D, $19, $01, $11, $1D, $19, $41, $11, $1D, $19, $01, $01, $01, $25, $25, $25, $25, $31, $01, $11, $1D, $39, $09, $35, $1D, $39, $09, $09, $09, $01, $45, $01, $01, $49, $01, $11, $1D, $15, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $01, $4D, $51, $55, $01, $01, $21, $25, $29, $1D, $2D, $25, $25, $25, $25, $25, $05, $09, $09, $09, $09, $09, $09, $09, $35, $1D, $39, $09, $09, $09, $09, $0D, $11, $1D, $15, $1D, $1D, $15, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $21, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $31, $BA, $AA, $AA, $AA, $FB, $FA, $FA, $AA, $28, $AA, $AA, $AA, $AA, $AA, $AF, $AF	; .byte $11,$1d,$1d,$1d,$15,$1d,$1d,$1d,$1d,$15,$19,$01,$11,$15,$15,$19
+	.byte $05, $09, $09, $09, $09, $09, $09, $09, $09, $09, $0D, $01, $05, $09, $09, $0D, $11, $D9, $D9, $D9, $15, $D9, $D9, $D9, $D9, $15, $19, $01, $11, $15, $15, $19, $11, $D9, $15, $D9, $D9, $D9, $15, $D9, $D9, $D9, $19, $01, $11, $15, $15, $19, $21, $25, $29, $D9, $2D, $25, $25, $25, $29, $D9, $19, $01, $11, $15, $15, $19, $45, $01, $11, $D9, $19, $01, $05, $09, $35, $D9, $39, $09, $35, $15, $15, $19, $01, $53, $11, $D9, $19, $01, $11, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $19, $01, $01, $11, $D9, $19, $01, $11, $D9, $2D, $25, $29, $D9, $2D, $25, $25, $31, $09, $09, $35, $D9, $19, $01, $11, $D9, $19, $3D, $11, $D9, $19, $01, $01, $01, $D9, $D9, $D9, $D9, $19, $01, $11, $D9, $19, $41, $11, $D9, $19, $01, $01, $01, $25, $25, $25, $25, $31, $01, $11, $D9, $39, $09, $35, $D9, $39, $09, $09, $09, $01, $45, $01, $01, $49, $01, $11, $D9, $15, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $01, $4D, $51, $55, $01, $01, $21, $25, $29, $D9, $2D, $25, $25, $25, $25, $25, $05, $09, $09, $09, $09, $09, $09, $09, $35, $D9, $39, $09, $09, $09, $09, $0D, $11, $D9, $15, $D9, $D9, $15, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $19, $21, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $31, $BA, $AA, $AA, $AA, $FB, $FA, $FA, $AA, $28, $AA, $AA, $AA, $AA, $AA, $AF, $AF	; .byte $11,$D9,$D9,$D9,$15,$D9,$D9,$D9,$D9,$15,$19,$01,$11,$15,$15,$19
 
 attribute_screen1:
 	.byte $ba,$aa,$aa,$aa,$aa,$aa,$aa,$aa,$fb,$fa,$fa,$fa,$fa,$aa,$aa,$aa
@@ -1130,7 +1116,7 @@ attribute_screen1:
 	.byte $ba,$aa,$aa,$aa,$aa,$aa,$aa,$aa,$0f,$0f,$0f,$0f,$0f,$0f,$0f,$0f
 
 background_screen2:
-.byte $01, $01, $05, $09, $0D, $01, $01, $05, $09, $09, $09, $09, $09, $09, $09, $0D, $45, $01, $11, $1D, $19, $01, $01, $11, $15, $15, $15, $15, $15, $15, $15, $19, $01, $01, $11, $1D, $19, $01, $45, $11, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $01, $01, $11, $1D, $19, $01, $01, $11, $1D, $2D, $25, $25, $25, $29, $1D, $19, $45, $01, $11, $1D, $19, $01, $01, $11, $1D, $19, $45, $01, $4D, $11, $1D, $19, $01, $53, $11, $1D, $19, $01, $01, $11, $1D, $19, $01, $49, $01, $11, $1D, $19, $4C, $01, $11, $1D, $39, $09, $09, $35, $1D, $19, $01, $01, $01, $11, $1D, $19, $55, $01, $11, $1D, $1D, $1D, $1D, $1D, $1D, $19, $53, $55, $01, $11, $1D, $19, $01, $01, $11, $1D, $2D, $25, $29, $1D, $2D, $31, $01, $01, $01, $11, $1D, $19, $09, $09, $35, $1D, $19, $01, $11, $1D, $19, $01, $01, $47, $01, $11, $1D, $19, $1D, $1D, $1D, $1D, $19, $01, $11, $1D, $19, $01, $49, $01, $01, $11, $1D, $19, $25, $25, $25, $25, $31, $01, $11, $1D, $19, $01, $01, $01, $01, $11, $1D, $19, $01, $45, $01, $4D, $01, $55, $11, $1D, $39, $09, $09, $09, $0D, $11, $15, $19, $01, $01, $49, $01, $45, $01, $11, $1D, $1D, $1D, $1D, $1D, $19, $11, $59, $19, $01, $01, $01, $01, $01, $01, $21, $25, $25, $25, $25, $25, $31, $21, $25, $31, $8A, $AA, $AA, $AA, $82, $AA, $EA, $FA, $28, $AA, $AA, $A8, $88, $AA, $AA, $AA
+.byte $01, $01, $05, $09, $0D, $01, $01, $05, $09, $09, $09, $09, $09, $09, $09, $0D, $45, $01, $11, $D9, $19, $01, $01, $11, $15, $15, $15, $15, $15, $15, $15, $19, $01, $01, $11, $D9, $19, $01, $45, $11, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $19, $01, $01, $11, $D9, $19, $01, $01, $11, $D9, $2D, $25, $25, $25, $29, $D9, $19, $45, $01, $11, $D9, $19, $01, $01, $11, $D9, $19, $45, $01, $4D, $11, $D9, $19, $01, $53, $11, $D9, $19, $01, $01, $11, $D9, $19, $01, $49, $01, $11, $D9, $19, $4C, $01, $11, $D9, $39, $09, $09, $35, $D9, $19, $01, $01, $01, $11, $D9, $19, $55, $01, $11, $D9, $D9, $D9, $D9, $D9, $D9, $19, $53, $55, $01, $11, $D9, $19, $01, $01, $11, $D9, $2D, $25, $29, $D9, $2D, $31, $01, $01, $01, $11, $D9, $19, $09, $09, $35, $D9, $19, $01, $11, $D9, $19, $01, $01, $47, $01, $11, $D9, $19, $D9, $D9, $D9, $D9, $19, $01, $11, $D9, $19, $01, $49, $01, $01, $11, $D9, $19, $25, $25, $25, $25, $31, $01, $11, $D9, $19, $01, $01, $01, $01, $11, $D9, $19, $01, $45, $01, $4D, $01, $55, $11, $D9, $39, $09, $09, $09, $0D, $11, $15, $19, $01, $01, $49, $01, $45, $01, $11, $D9, $D9, $D9, $D9, $D9, $19, $11, $59, $19, $01, $01, $01, $01, $01, $01, $21, $25, $25, $25, $25, $25, $31, $21, $25, $31, $8A, $AA, $AA, $AA, $82, $AA, $EA, $FA, $28, $AA, $AA, $A8, $88, $AA, $AA, $AA
 attribute_screen2:
 	.byte $8a,$aa,$aa,$aa,$aa,$aa,$aa,$aa,$82,$ea,$aa,$88,$ea,$fa,$fa,$aa
 	.byte $28,$aa,$aa,$a8,$aa,$20,$a8,$aa,$88,$aa,$aa,$aa,$aa,$08,$aa,$aa
@@ -1153,7 +1139,7 @@ attribute_screen4:
 	.byte $55,$55,$55,$55,$55,$55,$55,$55,$05,$05,$05,$05,$05,$05,$05,$05
 
 walkable_addresses:
-	.byte $05, $12, $14, $15, $16, $17, $18, $19, $1B, $1D, $1E, $1F, $20, $2A, $2C, $2D, $2F, $36, $38, $39, $3B, $FF
+	.byte $05, $12, $14, $15, $16, $17, $18, $19, $1B, $D9, $1E, $1F, $20, $2A, $2C, $2D, $2F, $36, $38, $39, $3B, $D9, $DA, $DB, $DC, $FF
 
 .segment "CHARS"
 .incbin "graphics.chr"
