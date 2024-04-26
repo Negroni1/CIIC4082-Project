@@ -14,6 +14,11 @@
 	background_offset_low:		.res 1
 	background_offset_up:		.res 1
 	background_tile_offset:		.res 1
+	tick_counter:				.res 1
+	counter_1:					.res 1
+	counter_2:					.res 1
+	counter_3:					.res 1
+	counter_offset:				.res 1
 
 .segment "STARTUP"
 
@@ -34,7 +39,9 @@
     STA $2005           
 
 	JSR update	
-
+	JSR drawCounter
+	JSR drawGameOver
+ 
 	LDA scroll_offset
 	STA $2005
 	LDA #$00
@@ -74,9 +81,15 @@
 	STX level_change
 	STX background_offset_low
 	STX background_tile_offset
+	STX counter_offset
 	LDX #$20
 	STX background_offset_up
-
+	LDX #$01
+	STX counter_3
+	LDX #$02
+	STX counter_2
+	LDX #$03
+	STX counter_1
 	
     JMP main
 .endproc
@@ -90,55 +103,101 @@
 	TYA						; Transfer Y into the Accumulator
 	PHA						; Push Y (the accumulator register) onto the stack
 
-    LDA $4016   ; Read controller 1
-    STA temp    ; Store state in temp variable
-    LDA #$01
-    STA $4016   ; Strobe controller
-    LDA #$00
-    STA $4016   ; Clear strobe, begin reading button states
-
-    LDY #$08    ; Prepare to read 8 buttons
-    LDA #$00    ; Clear A to start
-
-	read_buttons:
-		LDA $4016       ; Read button state
-		LSR             ; Shift right, moving the button's state into carry
-		ROL temp        ; Rotate Left through Carry to move button state into temp
-		DEY
-		BNE read_buttons
-
-	; Check Right (bit 7 of temp)
-	LDA temp
-	AND #%00000001  ; Isolate Right button
-	BEQ arrow_left  ; If 0, button not pressed, check next
-	LDA scroll_offset
-	CMP #$FF
-	BEQ continue
+	LDA tick_counter
+	CMP #$3C
+	BEQ change_counter
 	CLC
 	ADC #$01
-	STA scroll_offset
-	JMP continue
-
-	arrow_left:
-		LDA temp
-		AND #%00000010  ; Isolate Left button
-		BEQ button_start    ; If 0, button not pressed, check next
-		LDA scroll_offset
+	STA tick_counter
+	JMP controller
+	change_counter:
+		LDA #$00
+		STA tick_counter
+		LDA counter_1
 		CMP #$00
+		BEQ change_counter2
+		LDA counter_3
+		DEC counter_1
+		JMP controller
+		change_counter2:
+			LDA counter_2
+			CMP #$00
+			BEQ check
+			JMP dec_
+			check:
+			LDA counter_3
+			CMP #$00
+			BEQ continue
+			dec_:
+			LDA #$01
+			STA counter_1
+			LDA counter_2
+			CMP #$00
+			BEQ change_counter3
+			DEC counter_2
+			JMP controller
+			change_counter3:
+				LDA counter_3
+				CMP #$00
+				BEQ continue
+				LDA #$02
+				STA counter_2
+				LDA counter_3
+				CMP #$00
+				BEQ continue
+				DEC counter_3
+
+
+	controller:
+		LDA $4016   ; Read controller 1
+		STA temp    ; Store state in temp variable
+		LDA #$01
+		STA $4016   ; Strobe controller
+		LDA #$00
+		STA $4016   ; Clear strobe, begin reading button states
+
+		LDY #$08    ; Prepare to read 8 buttons
+		LDA #$00    ; Clear A to start
+
+		read_buttons:
+			LDA $4016       ; Read button state
+			LSR             ; Shift right, moving the button's state into carry
+			ROL temp        ; Rotate Left through Carry to move button state into temp
+			DEY
+			BNE read_buttons
+
+		; Check Right (bit 7 of temp)
+		LDA temp
+		AND #%00000001  ; Isolate Right button
+		BEQ arrow_left  ; If 0, button not pressed, check next
+		LDA scroll_offset
+		CMP #$FF
 		BEQ continue
-		DEC scroll_offset
+		CLC
+		ADC #$01
+		STA scroll_offset
 		JMP continue
 
-	button_start:
-		LDA temp
-		AND #%00010000
-		BEQ continue
-		; TODO: CHAGE MAP
-		LDA level_change
-		EOR #%01
-		STA level_change
-		LDA #$00
-		STA scroll_offset
+		arrow_left:
+			LDA temp
+			AND #%00000010  ; Isolate Left button
+			BEQ button_start    ; If 0, button not pressed, check next
+			LDA scroll_offset
+			CMP #$00
+			BEQ continue
+			DEC scroll_offset
+			JMP continue
+
+		button_start:
+			LDA temp
+			AND #%00010000
+			BEQ continue
+			; TODO: CHAGE MAP
+			LDA level_change
+			EOR #%01
+			STA level_change
+			LDA #$00
+			STA scroll_offset
 		
 
 	continue:
@@ -153,6 +212,105 @@
 	RTS						; Return from subroutine
 .endproc
 
+.proc drawGameOver
+	; SAVE REGISTER INTO THE STACK
+	PHP						; Push the Processor Status Register onto the stack
+	PHA						; Push the Accumulator Register onto the stack
+	TXA						; Transfer X into the Accumulator
+	PHA						; Push X (the accumulator register) onto the stack
+	TYA						; Transfer Y into the Accumulator
+	PHA						; Push Y (the accumulator register) onto the stack
+
+	LDA #$00
+	CLC
+	ADC counter_1
+	CLC	
+	ADC counter_2
+	CLC
+	ADC counter_3
+	CMP #$00
+	BNE exit
+
+
+	LDX #$00
+	game_over:
+		LDA gameOver,X
+		STA $0200,X
+		INX
+		CPX #$20
+		BNE game_over
+
+	exit:
+	; RESTORE REGISTERS & RETURN
+	PLA						; Pull Y of the stack and place it into the accumulator	register
+	TAY						; Restore/Transfer the accumulator into Y
+	PLA						; Pull X of the stack and place it into the accumulator	register
+	TAX						; Restore/Transfer the accumulator into X
+	PLA						; Pull the top value of the stack and place it into the accumulator register
+	PLP						; Pull the top value of the stack and place it into the  processor status register
+	RTS						; Return from subroutine
+.endproc
+
+.proc drawCounter
+	; SAVE REGISTER INTO THE STACK
+	PHP						; Push the Processor Status Register onto the stack
+	PHA						; Push the Accumulator Register onto the stack
+	TXA						; Transfer X into the Accumulator
+	PHA						; Push X (the accumulator register) onto the stack
+	TYA						; Transfer Y into the Accumulator
+	PHA						; Push Y (the accumulator register) onto the stack
+
+	LDX counter_offset
+	
+	LDA #$00
+	STA $0200, X    
+	LDA counter_3
+	CLC
+	ADC #$40
+	STA $0201, X     
+	LDA #$02
+	STA $0202, X         
+	LDA #$D0
+	STA $0203, X  
+
+	LDA #$00
+	STA $0204, X         
+	LDA counter_2
+	CLC
+	ADC #$40
+	STA $0205, X      
+	LDA #$02
+	STA $0206, X         
+	LDA #$D8
+	STA $0207, X 
+
+
+	LDA #$00
+	STA $0208        
+	LDA counter_1
+	CLC
+	ADC #$40
+	STA $0209, X      
+	LDA #$02
+	STA $020A, X         
+	LDA #$E0
+	STA $020B, X  
+
+	LDA counter_offset
+	CLC
+	ADC #$10
+	STA counter_offset 			; Increase frog offset by 16  
+	; RESTORE REGISTERS & RETURN
+	PLA						; Pull Y of the stack and place it into the accumulator	register
+	TAY						; Restore/Transfer the accumulator into Y
+	PLA						; Pull X of the stack and place it into the accumulator	register
+	TAX						; Restore/Transfer the accumulator into X
+	PLA						; Pull the top value of the stack and place it into the accumulator register
+	PLP						; Pull the top value of the stack and place it into the  processor status register
+	RTS						; Return from subroutine
+.endproc
+
+
 .proc drawBackground
     ; Save register states to the stack
     PHP
@@ -161,20 +319,23 @@
     PHA
     TYA
     PHA
+
     ; WRITE BACKGROUND DATA ---------------------------------------------------------------+
-	LDX 00
+	LDX #$00
 	STX background_tile_offset
 	; ; BACKGROUND 1 ----------------------------------------------------------------------+
 	; ; ; UPPER ---------------------------------------------------------------------------+
 	LDA level_change
 	CMP #$01
 	BNE bg
+
 	vblankwait_off:         ; wait for another vblank before continuing
         BIT $2002       ; 2002 = PPU status
         BPL vblankwait_off
 		LDA #%00000000  ; turn on NMIs, sprites use first pattern table
 		STA $2000       ; Store A in PPU Control
 		LDA #%00000000  ; turn on screen
+		LDA #%00010110
 		STA $2001       ; Store A in PPU Mask
 
 		LDA #$20
@@ -294,7 +455,7 @@
 			LDA level_change
 			CMP #$01
 			BNE screen2_up
-			LDA background_screen4, X 
+			LDA background_screen3, X 
 			JMP screen2_con
 			screen2_up:
 			LDA background_screen2, X 
@@ -450,7 +611,7 @@
         LDA palettes, X     ; Load palettes into X
         STA $2007           ; Store X into PPU data
         INX                 ; Increase X
-        CPX #$18            ; Compare X, If X > 24 (6 patterns tables)
+        CPX #$20            ; Compare X, If X > 24 (6 patterns tables)
         BNE load_palettes   ; 
 
 	JSR drawBackground
@@ -468,11 +629,20 @@
 		.byte $2C, $0F, $1C, $3B    ; green, dark green, light green
 		.byte $2C, $1C, $3C, $2B    ; green blue, blue, light blue
 		.byte $2C, $1C, $17, $2B    ; green blue, brown, light green
+		.byte $2C, $0f, $28, $20    ; green, black, green, white
+		.byte $2C, $0f, $17, $3B    ; green, black, green, green
+		.byte $2C, $0f, $25, $20
 		.byte $2C, $00, $00, $00
-		.byte $2C, $00, $00, $00
-		.byte $2C, $00, $00, $00
-		.byte $2C, $00, $00, $00
+	gameOver:
+		.byte $68, $60, $02, $60 	; G
+		.byte $68, $61, $02, $70 	; A
+		.byte $68, $62, $02, $80 	; M
+		.byte $68, $63, $02, $90 	; E
 
+		.byte $78, $64, $02, $60 	; O
+		.byte $78, $65, $02, $70 	; V
+		.byte $78, $66, $02, $80 	; E
+		.byte $78, $67, $02, $90 	; R
 background_screen1:
 	.byte $05, $09, $09, $09, $09, $09, $09, $09, $09, $09, $0D, $01, $05, $09, $09, $0D, $11, $1D, $1D, $1D, $15, $1D, $1D, $1D, $1D, $15, $19, $01, $11, $15, $15, $19, $11, $1D, $15, $1D, $1D, $1D, $15, $1D, $1D, $1D, $19, $01, $11, $15, $15, $19, $21, $25, $29, $1D, $2D, $25, $25, $25, $29, $1D, $19, $01, $11, $15, $15, $19, $45, $01, $11, $1D, $19, $01, $05, $09, $35, $1D, $39, $09, $35, $15, $15, $19, $01, $53, $11, $1D, $19, $01, $11, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $01, $01, $11, $1D, $19, $01, $11, $1D, $2D, $25, $29, $1D, $2D, $25, $25, $31, $09, $09, $35, $1D, $19, $01, $11, $1D, $19, $3D, $11, $1D, $19, $01, $01, $01, $1D, $1D, $1D, $1D, $19, $01, $11, $1D, $19, $41, $11, $1D, $19, $01, $01, $01, $25, $25, $25, $25, $31, $01, $11, $1D, $39, $09, $35, $1D, $39, $09, $09, $09, $01, $45, $01, $01, $49, $01, $11, $1D, $15, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $01, $4D, $51, $55, $01, $01, $21, $25, $29, $1D, $2D, $25, $25, $25, $25, $25, $05, $09, $09, $09, $09, $09, $09, $09, $35, $1D, $39, $09, $09, $09, $09, $0D, $11, $1D, $15, $1D, $1D, $15, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $21, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $31, $BA, $AA, $AA, $AA, $FB, $FA, $FA, $AA, $28, $AA, $AA, $AA, $AA, $AA, $AF, $AF	; .byte $11,$1d,$1d,$1d,$15,$1d,$1d,$1d,$1d,$15,$19,$01,$11,$15,$15,$19
 
@@ -483,7 +653,7 @@ attribute_screen1:
 	.byte $ba,$aa,$aa,$aa,$aa,$aa,$aa,$aa,$0f,$0f,$0f,$0f,$0f,$0f,$0f,$0f
 
 background_screen2:
-	.byte $01, $01, $05, $09, $0D, $01, $01, $05, $09, $09, $09, $09, $09, $09, $09, $0D, $45, $01, $11, $1D, $19, $01, $01, $11, $15, $15, $15, $15, $15, $15, $15, $19, $01, $01, $11, $1D, $19, $01, $45, $11, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $01, $01, $11, $1D, $19, $01, $01, $11, $1D, $2D, $25, $25, $25, $29, $1D, $19, $45, $01, $11, $1D, $19, $01, $01, $11, $1D, $19, $45, $01, $4D, $11, $1D, $19, $01, $53, $11, $1D, $19, $01, $01, $11, $1D, $19, $01, $49, $01, $11, $1D, $19, $4C, $01, $11, $1D, $39, $09, $09, $35, $1D, $19, $01, $01, $01, $11, $1D, $19, $55, $01, $11, $1D, $1D, $1D, $1D, $1D, $1D, $19, $53, $55, $01, $11, $1D, $19, $01, $01, $11, $1D, $2D, $25, $29, $1D, $2D, $31, $01, $01, $01, $11, $1D, $19, $09, $09, $35, $1D, $19, $01, $11, $1D, $19, $01, $01, $47, $01, $11, $1D, $19, $1D, $1D, $1D, $1D, $19, $01, $11, $1D, $19, $01, $49, $01, $01, $11, $1D, $19, $25, $25, $25, $25, $31, $01, $11, $1D, $19, $01, $01, $01, $01, $11, $1D, $19, $01, $45, $01, $4D, $01, $55, $11, $1D, $39, $09, $09, $09, $0D, $11, $15, $19, $01, $01, $49, $01, $45, $01, $11, $1D, $1D, $1D, $1D, $1D, $19, $11, $59, $19, $01, $01, $01, $01, $01, $01, $21, $25, $25, $25, $25, $25, $31, $21, $25, $31, $8A, $AA, $AA, $AA, $82, $AA, $EA, $FA, $28, $AA, $AA, $A8, $88, $AA, $AA, $AA
+.byte $01, $01, $05, $09, $0D, $01, $01, $05, $09, $09, $09, $09, $09, $09, $09, $0D, $45, $01, $11, $1D, $19, $01, $01, $11, $15, $15, $15, $15, $15, $15, $15, $19, $01, $01, $11, $1D, $19, $01, $45, $11, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $01, $01, $11, $1D, $19, $01, $01, $11, $1D, $2D, $25, $25, $25, $29, $1D, $19, $45, $01, $11, $1D, $19, $01, $01, $11, $1D, $19, $45, $01, $4D, $11, $1D, $19, $01, $53, $11, $1D, $19, $01, $01, $11, $1D, $19, $01, $49, $01, $11, $1D, $19, $4C, $01, $11, $1D, $39, $09, $09, $35, $1D, $19, $01, $01, $01, $11, $1D, $19, $55, $01, $11, $1D, $1D, $1D, $1D, $1D, $1D, $19, $53, $55, $01, $11, $1D, $19, $01, $01, $11, $1D, $2D, $25, $29, $1D, $2D, $31, $01, $01, $01, $11, $1D, $19, $09, $09, $35, $1D, $19, $01, $11, $1D, $19, $01, $01, $47, $01, $11, $1D, $19, $1D, $1D, $1D, $1D, $19, $01, $11, $1D, $19, $01, $49, $01, $01, $11, $1D, $19, $25, $25, $25, $25, $31, $01, $11, $1D, $19, $01, $01, $01, $01, $11, $1D, $19, $01, $45, $01, $4D, $01, $55, $11, $1D, $39, $09, $09, $09, $0D, $11, $15, $19, $01, $01, $49, $01, $45, $01, $11, $1D, $1D, $1D, $1D, $1D, $19, $11, $59, $19, $01, $01, $01, $01, $01, $01, $21, $25, $25, $25, $25, $25, $31, $21, $25, $31, $8A, $AA, $AA, $AA, $82, $AA, $EA, $FA, $28, $AA, $AA, $A8, $88, $AA, $AA, $AA
 attribute_screen2:
 	.byte $8a,$aa,$aa,$aa,$aa,$aa,$aa,$aa,$82,$ea,$aa,$88,$ea,$fa,$fa,$aa
 	.byte $28,$aa,$aa,$a8,$aa,$20,$a8,$aa,$88,$aa,$aa,$aa,$aa,$08,$aa,$aa
@@ -491,7 +661,7 @@ attribute_screen2:
 	.byte $a2,$82,$82,$aa,$aa,$aa,$ee,$aa,$0a,$0a,$0a,$0f,$0f,$0f,$0f,$0f
 
 background_screen3:
-	.byte $61, $65, $69, $6D, $79, $7D, $89, $89, $89, $89, $89, $79, $7D, $89, $91, $5D, $61, $65, $69, $71, $81, $85, $8D, $8D, $8D, $8D, $8D, $81, $85, $8D, $B1, $5D, $61, $65, $99, $75, $75, $75, $75, $75, $75, $75, $75, $75, $75, $A1, $B1, $5D, $61, $65, $99, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $99, $69, $B1, $5D, $61, $65, $69, $B9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $BD, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $C9, $89, $79, $7D, $89, $91, $61, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $61, $8D, $81, $85, $8D, $B1, $61, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $61, $CD, $75, $75, $A1, $B1, $61, $65, $69, $6D, $89, $61, $65, $69, $B1, $5D, $61, $65, $99, $99, $69, $D1, $D5, $65, $69, $71, $8D, $61, $65, $69, $B1, $5D, $61, $65, $99, $99, $69, $B1, $61, $65, $99, $75, $75, $61, $65, $69, $6D, $89, $C1, $65, $99, $99, $69, $B1, $61, $A5, $9D, $9D, $9D, $61, $65, $69, $71, $8D, $C5, $65, $99, $99, $69, $B1, $95, $A9, $A9, $A9, $A9, $61, $65, $99, $75, $75, $75, $99, $99, $99, $69, $B1, $5D, $5D, $5D, $5D, $5D, $61, $65, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $B5, $B1, $5D, $5D, $5D, $5D, $5D, $95, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $AD, $5D, $5D, $5D, $5D, $5D
+.byte $61, $65, $69, $6D, $79, $7D, $89, $89, $89, $89, $89, $79, $7D, $89, $91, $5D, $61, $65, $69, $71, $81, $85, $8D, $8D, $8D, $8D, $8D, $81, $85, $8D, $B1, $5D, $61, $65, $99, $75, $75, $75, $75, $75, $75, $75, $75, $75, $75, $A1, $B1, $5D, $61, $65, $99, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $99, $69, $B1, $5D, $61, $65, $69, $B9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $BD, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $C9, $89, $79, $7D, $89, $91, $61, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $61, $8D, $81, $85, $8D, $B1, $61, $65, $69, $B1, $5D, $61, $65, $69, $B1, $5D, $61, $CD, $75, $75, $A1, $B1, $61, $65, $69, $6D, $89, $61, $65, $69, $B1, $5D, $61, $65, $99, $99, $69, $D1, $D5, $65, $69, $71, $8D, $61, $65, $69, $B1, $5D, $61, $65, $99, $99, $69, $B1, $61, $65, $99, $75, $75, $61, $65, $69, $6D, $89, $C1, $65, $99, $99, $69, $B1, $61, $A5, $9D, $9D, $9D, $61, $65, $69, $71, $8D, $C5, $65, $99, $99, $69, $B1, $95, $A9, $A9, $A9, $A9, $61, $65, $99, $75, $75, $75, $99, $99, $99, $69, $B1, $5D, $5D, $5D, $5D, $5D, $61, $65, $9D, $9D, $9D, $9D, $9D, $9D, $9D, $B5, $B1, $5D, $5D, $5D, $5D, $5D, $95, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $A9, $AD, $5D, $5D, $5D, $5D, $5D, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55, $55
 attribute_screen3:
 	.byte $55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55
 	.byte $55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55

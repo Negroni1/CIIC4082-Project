@@ -33,8 +33,8 @@ def write_binary_file(file_path, data):
             # else: 
             file.write(" ${:02X},".format(data[byte]))
 
-input_file_path = 'screen3.nam'  # Path to background file
-output_file_path = 'background3_compress.asm'  # Path to save the compressed data
+input_file_path = 'screen4.nam'  # Path to background file
+output_file_path = 'background4_compress.asm'  # Path to save the compressed data
 
 original_data = read_binary_file(input_file_path)
 print(original_data)
