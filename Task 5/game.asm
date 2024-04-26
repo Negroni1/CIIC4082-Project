@@ -28,6 +28,10 @@
 	PPULow: .res 1
 	PPUHigh: .res 1
 	temp: .res 1
+	isMoving: .res 1
+	scroll_temp: .res 1
+	tempFrogX: .res 1
+	tempFrogY: .res 1
 	; chrTilePtr: .res 2
 
 ; .segment "BSS"
@@ -67,11 +71,14 @@
 	LDA #$80							; A = 136
 	STA frogY							; Set frog Y to 136
 
+	LDA $2002
+
 	LDA #$00							; A = 0
 	STA animationState		; Set animation state to 0
 	STA tick							; Set tick to 0
 	STA frogOffSet				; Set frog memory allocation offset to 0
 	; STA directionOffSet		; Set frog direction offset to 0
+	STA scroll_offset
   STA $2005           ; PPU Scroll = 0
   STA $2005  
   STA controllerInput   						; Set controllerInput to 0
@@ -98,6 +105,11 @@
 .endproc
 
 .proc nmi_handler       ; NMI (“Non-Maskable Interrupt”) occurs when the PPU starts preparing the next frame of graphics, 60 times per second.
+	LDA isMoving
+	CMP #$00
+	JMP handler
+	RTI
+	handler:
 	; Initialize OAM for DMA transfer
 	LDA #$00
 	STA $2003           ; Set OAM start address for DMA
@@ -147,6 +159,9 @@
 	STA tileY
 	STA TileIndex
 
+	LDA #$01
+	STA isMoving
+
 	; Read and process controller input
 	LDA $4016   ; Read controller 1
 	STA controllerInput    ; Store state in controllerInput variable
@@ -183,82 +198,88 @@
 			INC frogX       ; Move right
 			
 			SkipIncrementRight:
-			LDA #$01
-			STA hasMoved ; Set hasMoved to 1
+				LDA #$01
+				STA hasMoved ; Set hasMoved to 1
 
-			JMP update_done
+				LDA scroll_temp
+				STA scroll_offset
+				JMP update_done
+
+				JMP update_done
 
 			check_left:
-					LDA controllerInput
-					AND #%00000010  ; Isolate Left button
-					BEQ check_up    ; If 0, button not pressed, check next
+				LDA controllerInput
+				AND #%00000010  ; Isolate Left button
+				BEQ check_up    ; If 0, button not pressed, check next
+				
+				LDA #$01
+				STA frogDirection ; Set frogDirection to 01 (Left)
+
+				JSR checkWalkable
+				CMP #$00
+				BEQ near_done
+
+				LDA frogX
+				CMP #$00
+				BEQ SkipDecrementLeft
+				DEC frogX       ; Move left
 					
-					LDA #$01
-					STA frogDirection ; Set frogDirection to 01 (Left)
+				SkipDecrementLeft:
+				LDA #$01
+				STA hasMoved ; Set hasMoved to 1
 
-					JSR checkWalkable
-					CMP #$00
-					BEQ update_done
-
-					LDA frogX
-					CMP #$00
-					BEQ SkipDecrementLeft
-					DEC frogX       ; Move left
-					
-					SkipDecrementLeft:
-					LDA #$01
-					STA hasMoved ; Set hasMoved to 1
-
-					JMP update_done
+				LDA scroll_temp
+				STA scroll_offset
+				JMP update_done
 
 			check_up:
-					LDA controllerInput
-					AND #%00001000  ; Isolate Up button
-					BEQ check_down  ; If 0, button not pressed, check next
-					
-					LDA #$19
-					STA frogDirection ; Set frogDirection to 19 (Up)
+				LDA controllerInput
+				AND #%00001000  ; Isolate Up button
+				BEQ check_down  ; If 0, button not pressed, check next
+				
+				LDA #$19
+				STA frogDirection ; Set frogDirection to 19 (Up)
 
-					JSR checkWalkable
-					CMP #$00
-					BEQ update_done
+				JSR checkWalkable
+				CMP #$00
+				BEQ update_done
 
-					LDA frogY
-					CMP #$00
-					BEQ SkipDecrementUp
-					DEC frogY       ; Move up
+				LDA frogY
+				CMP #$00
+				BEQ SkipDecrementUp
+				DEC frogY       ; Move up
 
-					SkipDecrementUp:
-					LDA #$01
-					STA hasMoved ; Set hasMoved to 1
+				SkipDecrementUp:
+				LDA #$01
+				STA hasMoved ; Set hasMoved to 1
 
-					JMP update_done
+				JMP update_done
 
 			near_done:
 				JMP update_done
 
 			check_down:
-					LDA controllerInput
-					AND #%00000100  ; Isolate Down button
-					BEQ no_movement ; If 0, button not pressed, no movement was done
-					
-					LDA #$0D
-					STA frogDirection ; Set frogDirection to 0D (Down)
+				LDA controllerInput
+				AND #%00000100  ; Isolate Down button
+				BEQ no_movement ; If also 0, no relevant button not pressed, no movement was done
+				
+				LDA #$0D
+				STA frogDirection ; Set frogDirection to 0D (Down)
 
-					JSR checkWalkable
-					CMP #$00
-					BEQ update_done
+				JSR checkWalkable
+				CMP #$00
+				BEQ update_done
 
-					LDA frogY
-					CMP #$E8
-					BEQ SkipIncrementDown
-					INC frogY       ; Move down
+				LDA frogY
+				CMP #$E8
+				BEQ SkipIncrementDown
+				INC frogY       ; Move down
 
-					SkipIncrementDown:
-					LDA #$01
-					STA hasMoved ; Set hasMoved to 1
-					
-					JMP update_done
+				SkipIncrementDown:
+				LDA #$01
+				STA hasMoved ; Set hasMoved to 1
+				
+				JMP update_done
 				
 			no_movement:
 					LDA #$00
@@ -271,6 +292,8 @@
 					JMP update_done
 
 		update_done:
+				LDA #$00
+				STA isMoving
     		JSR draw        ; Call Draw function to reflect changes
   
 	; Wait for VBlank to end before restoring registers (prevents changes during rendering)
@@ -278,7 +301,9 @@
     BIT $2002
     BMI WaitEndVBlank      ; Wait until VBlank is over
 
-			LDA #$00
+			LDA $2002
+
+			LDA scroll_offset
 			STA $2005
 			LDA #$00
 			STA $2005
@@ -306,11 +331,13 @@
 	PHA						; Push X (the accumulator register) onto the stack
 	TYA						; Transfer Y into the Accumulator
 	PHA						; Push Y (the accumulator register) onto the stack
-
+	
 	LDA frogX
-	STA tileX
+	STA tempFrogX
 	LDA frogY
-	STA tileY
+	STA tempFrogY
+	LDA scroll_offset
+	STA scroll_temp
 
 	;	Directional Branching
 	LDA frogDirection
@@ -331,36 +358,40 @@
 	JMP NearExit
 
 	Left_Tile:
-			LDA frogX
-			CMP #$00
-			BEQ NearExit    ; Exit if at boundary
-			; SEC         ; Set carry for subtraction
-			; SBC #$01    ; Decrement frogX
+			LDA tempFrogX
+			; CMP #$00
+			; BEQ NearExit    ; Exit if at boundary
+			SEC         ; Set carry for subtraction
+			SBC #$20    ; Decrement frogX
+			STA tempFrogX
 			JMP HandleScrollDecrement
 
 	Right_Tile:
-			LDA frogX
-			; CMP #$F8    ; Check if frogX is less than 248
-			; BEQ NearExit
-			; CLC         ; Clear carry for addition
-			; ADC #$01    ; Increment frogX
+			LDA tempFrogX
+			CMP #$F8    ; Check if frogX is less than 248
+			BEQ NearExit
+			CLC         ; Clear carry for addition
+			ADC #$08    ; Increment frogX
+			STA tempFrogX
 			JMP HandleScrollIncrement
 
 	Up_Tile:
-			LDA frogY
-			CMP #$00
+			LDA tempFrogY
+			CMP #$08
 			BEQ NearExit
-			; SEC         ; Set carry for subtraction
-			; SBC #$01    ; Decrement frogY
+			SEC         ; Set carry for subtraction
+			SBC #$08    ; Decrement frogY
+			STA tempFrogY
 			JSR Calculate_Index  ; Only need to recalculate indexes
 			JMP NearExit
 
 	Down_Tile:
-			; LDA frogY
-			; CMP #$E8    ; Check if frogY is less than 232
-			; BEQ NearExit
-			; CLC         ; Clear carry for addition
-			; ADC #$01    ; Increment frogY
+			LDA tempFrogY
+			CMP #$E8    ; Check if frogY is less than 232
+			BEQ NearExit
+			CLC         ; Clear carry for addition
+			ADC #$08    ; Increment frogY
+			STA tempFrogY
 			JSR Calculate_Index  ; Only need to recalculate indexes
 			JMP NearExit
 
@@ -368,60 +399,67 @@
 			JMP Exit  ; Use unconditional jump to reach the actual exit point
 
 	HandleScrollDecrement:
-    ; LDA scroll_offset
-    ; CMP #$00    ; Check if scroll_offset is lower than 0
-    ; BEQ SkipDecrement  ; Skip if decrementing leads to underflow
-    ; SEC         ; Set carry for subtraction
-    ; SBC #$01    ; Decrement scroll_offset
-    ; STA scroll_offset    ; Update the global state if everything is fine
+    LDA scroll_offset
+    CMP #$00    ; Check if scroll_offset is lower than 0
+    BEQ SkipDecrement  ; Skip if decrementing leads to underflow
+    SEC         ; Set carry for subtraction
+    SBC #$01    ; Decrement scroll_offset
+    STA scroll_temp    ; Update the temporal state if everything is fine
+	SkipDecrement:
     JSR Calculate_Index  ; Use the updated value for calculation
 		JMP Exit
-	SkipDecrement:
-    JMP Exit
 
 	HandleScrollIncrement:
-    ; LDA scroll_offset
-    ; CMP #$FF    ; Check if scroll_offset is greater than 255
-    ; BEQ SkipIncrement  ; Skip if incrementing leads to overflow
-    ; CLC         ; Clear carry for addition
-    ; ADC #$01    ; Increment scroll_offset
-    ; STA scroll_offset    ; Update the global state if everything is fine
+    LDA scroll_offset
+    CMP #$FF    ; Check if scroll_offset is greater than 255
+    BEQ SkipIncrement  ; Skip if incrementing leads to overflow
+    CLC         ; Clear carry for addition
+    ADC #$01    ; Increment scroll_offset
+		STA temp
+    STA scroll_temp    ; Update the temporal state if everything is fine
+	SkipIncrement:
     JSR Calculate_Index  ; Use the updated value for calculation
 		JMP Exit
-	SkipIncrement:
-    JMP Exit
 
 	Calculate_Index:
-    ; ; Calculate top-left tile (already given in your scenario)
-    ; LDA FrogX
-    ; CLC
-    ; ADC scroll_offset
-    ; LSR A
-    ; LSR A
-    ; LSR A        ; Divide by 8 to get tile column
-    ; STA tileX
 
-    ; LDA FrogY
-    ; LSR A
-    ; LSR A
-    ; LSR A        ; Divide by 8 to get tile row
-    ; STA tileY
+		LDA scroll_temp
+    LSR A
+    LSR A
+    LSR A
+		STA temp
 
-    LDA frogX
+    LDA tempFrogX
     CLC
-    ADC #$04
+    ; ADC $00
     ; ADC scroll_offset
     LSR A
     LSR A
     LSR A
+		CLC
+		ADC temp
     STA tileX
 
-    LDA frogY
+    LDA tempFrogY
     CLC
-    ADC #$04
+    ADC #$08
     LSR A
     LSR A
     LSR A
+    STA tileY
+
+		; Wrap TileX within 0 to 31
+    LDA tileX
+    AND #$1F       ; Wrap around if exceeded 31
+    STA tileX
+
+    ; Ensure TileY is within 0 to 29
+    LDA tileY
+    CMP #$1E       ; Compare with 30
+    BCC TileYOK    ; If less than 30, it's OK
+    LDA #$1D       ; Set to 29 if exceeded
+
+		TileYOK:
     STA tileY
 
     JSR Calculate_Next_Tile
@@ -437,6 +475,13 @@
     ; We need to add tileY to itself 5 times (tileY * 32 = tileY * (2^5))
     LDY #$05   ; Set the loop counter to 5 for the number of additions needed
 
+		; LDA scroll_offset
+		; SEC
+		; SBC $80
+		; BMI multiply_loop
+
+		; DEY
+
 		multiply_loop:
     CLC        ; Clear carry before addition
     LDA $00
@@ -449,7 +494,7 @@
     DEY        ; Decrement the loop counter
     BNE multiply_loop  ; If Y is not zero, repeat the loop
 
-    ; At this point, $00 and $01 contain the result of tileY * 32
+    ; At this point, $00 and $01 contain the result of tileY * 32 or tileY * 16, depending on offset
     ; $00 holds the low byte, $01 holds the high byte
 		LDA $01
 		STA PPUHigh
@@ -468,15 +513,39 @@
 		ADC tileX
     STA PPULow        ; Store adjusted high byte of PPU address
 
-    LDA PPUHigh
-    STA $2006          ; Set high byte of PPU address
-		LDA PPULow
-    STA $2006          ; Set low byte of PPU address
+		; Ensure we're in VBlank to safely set PPU addresses and read data
+    ; waitForVBlank:
+    ;   BIT $2002
+    ;   BPL waitForVBlank
+		
+		; Sometimes the result could be affected by other changes
+		; therefore, repeat the calculation until we get a valid value
+		Read_Loop:
+			LDA $2002
+			LDA PPUHigh
+			STA $2006          ; Set high byte of PPU address
+			LDA PPULow
+			STA $2006          ; Set low byte of PPU address
 
-		LDA $2007				 ; The first read from $2007 is invalid
-		LDA $2007
-		STA TileIndex
+			LDA $2002
+			LDA $2007				 ; The first read from $2007 is invalid
+			LDA $2007
+			STA TileIndex
 
+			LDA TileIndex
+			CMP #$FF
+			BEQ Read_Loop
+			
+			LDA TileIndex
+			CMP #$00
+			BEQ Read_Loop
+
+			LDA $2002
+
+			LDA scroll_offset
+			STA $2005
+			LDA #$00
+			STA $2005
 		RTS
 
 	Exit:
@@ -486,6 +555,14 @@
 		STA PPULow
     STA $2006          ; Set high byte of PPU address
     STA $2006          ; Set low byte of PPU address
+
+		LDA scroll_offset
+		STA $2005
+		LDA #$00
+		STA $2005
+
+		LDA #$00
+		STA isMoving
 
     PLA
     TAY
@@ -962,6 +1039,11 @@
 		STA $2001       ; Store A in PPU Mask
 	LDA #$00
 	STA level_change
+	
+	LDA scroll_offset
+	STA $2005
+	LDA #$00
+	STA $2005
 
 	PLA
     TAY
@@ -1025,7 +1107,7 @@
 		.byte $2C, $00, $00, $00
 
 background_screen1:
-	.byte $05, $09, $09, $09, $09, $09, $09, $09, $09, $09, $0D, $01, $05, $09, $09, $0D, $11, $1D, $1D, $1D, $15, $1D, $1D, $1D, $1D, $15, $19, $01, $11, $15, $15, $19, $11, $1D, $15, $1D, $1D, $1D, $15, $1D, $1D, $1D, $19, $01, $11, $15, $15, $19, $21, $25, $29, $1D, $2D, $25, $25, $25, $29, $1D, $19, $01, $11, $15, $15, $19, $45, $01, $11, $1D, $19, $01, $05, $09, $35, $1D, $39, $09, $35, $15, $15, $19, $01, $53, $11, $1D, $19, $01, $11, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $01, $01, $11, $1D, $19, $01, $11, $1D, $2D, $25, $29, $1D, $2D, $25, $25, $31, $09, $09, $35, $1D, $19, $01, $11, $1D, $19, $3D, $11, $1D, $19, $01, $01, $01, $1D, $1D, $1D, $1D, $19, $01, $11, $1D, $19, $41, $11, $1D, $19, $01, $01, $01, $25, $25, $25, $25, $31, $01, $11, $1D, $39, $09, $35, $1D, $39, $09, $09, $09, $01, $45, $01, $01, $49, $01, $11, $1D, $15, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $01, $4D, $51, $55, $01, $01, $21, $25, $29, $1D, $2D, $25, $25, $25, $25, $25, $05, $09, $09, $09, $09, $09, $09, $09, $35, $1D, $39, $09, $09, $09, $09, $0D, $11, $1D, $15, $1D, $1D, $15, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $21, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $31, $BA, $AA, $AA, $AA, $FB, $FA, $FA, $AA, $28, $AA, $AA, $AA, $AA, $AA, $AF, $AF	; .byte $11,$1d,$1d,$1d,$15,$1d,$1d,$1d,$1d,$15,$19,$01,$11,$15,$15,$19
+	.byte $05, $09, $09, $09, $09, $09, $09, $09, $09, $09, $0D, $01, $05, $09, $09, $0D, $11, $D9, $D9, $D9, $15, $D9, $D9, $D9, $D9, $15, $19, $01, $11, $15, $15, $19, $11, $D9, $15, $D9, $D9, $D9, $15, $D9, $D9, $D9, $19, $01, $11, $15, $15, $19, $21, $25, $29, $D9, $2D, $25, $25, $25, $29, $D9, $19, $01, $11, $15, $15, $19, $45, $01, $11, $D9, $19, $01, $05, $09, $35, $D9, $39, $09, $35, $15, $15, $19, $01, $53, $11, $D9, $19, $01, $11, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $19, $01, $01, $11, $D9, $19, $01, $11, $D9, $2D, $25, $29, $D9, $2D, $25, $25, $31, $09, $09, $35, $D9, $19, $01, $11, $D9, $19, $3D, $11, $D9, $19, $01, $01, $01, $D9, $D9, $D9, $D9, $19, $01, $11, $D9, $19, $41, $11, $D9, $19, $01, $01, $01, $25, $25, $25, $25, $31, $01, $11, $D9, $39, $09, $35, $D9, $39, $09, $09, $09, $01, $45, $01, $01, $49, $01, $11, $D9, $15, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $01, $4D, $51, $55, $01, $01, $21, $25, $29, $D9, $2D, $25, $25, $25, $25, $25, $05, $09, $09, $09, $09, $09, $09, $09, $35, $D9, $39, $09, $09, $09, $09, $0D, $11, $D9, $15, $D9, $D9, $15, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $19, $21, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $31, $BA, $AA, $AA, $AA, $FB, $FA, $FA, $AA, $28, $AA, $AA, $AA, $AA, $AA, $AF, $AF	; .byte $11,$D9,$D9,$D9,$15,$D9,$D9,$D9,$D9,$15,$19,$01,$11,$15,$15,$19
 
 attribute_screen1:
 	.byte $ba,$aa,$aa,$aa,$aa,$aa,$aa,$aa,$fb,$fa,$fa,$fa,$fa,$aa,$aa,$aa
@@ -1034,7 +1116,7 @@ attribute_screen1:
 	.byte $ba,$aa,$aa,$aa,$aa,$aa,$aa,$aa,$0f,$0f,$0f,$0f,$0f,$0f,$0f,$0f
 
 background_screen2:
-.byte $01, $01, $05, $09, $0D, $01, $01, $05, $09, $09, $09, $09, $09, $09, $09, $0D, $45, $01, $11, $1D, $19, $01, $01, $11, $15, $15, $15, $15, $15, $15, $15, $19, $01, $01, $11, $1D, $19, $01, $45, $11, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $01, $01, $11, $1D, $19, $01, $01, $11, $1D, $2D, $25, $25, $25, $29, $1D, $19, $45, $01, $11, $1D, $19, $01, $01, $11, $1D, $19, $45, $01, $4D, $11, $1D, $19, $01, $53, $11, $1D, $19, $01, $01, $11, $1D, $19, $01, $49, $01, $11, $1D, $19, $4C, $01, $11, $1D, $39, $09, $09, $35, $1D, $19, $01, $01, $01, $11, $1D, $19, $55, $01, $11, $1D, $1D, $1D, $1D, $1D, $1D, $19, $53, $55, $01, $11, $1D, $19, $01, $01, $11, $1D, $2D, $25, $29, $1D, $2D, $31, $01, $01, $01, $11, $1D, $19, $09, $09, $35, $1D, $19, $01, $11, $1D, $19, $01, $01, $47, $01, $11, $1D, $19, $1D, $1D, $1D, $1D, $19, $01, $11, $1D, $19, $01, $49, $01, $01, $11, $1D, $19, $25, $25, $25, $25, $31, $01, $11, $1D, $19, $01, $01, $01, $01, $11, $1D, $19, $01, $45, $01, $4D, $01, $55, $11, $1D, $39, $09, $09, $09, $0D, $11, $15, $19, $01, $01, $49, $01, $45, $01, $11, $1D, $1D, $1D, $1D, $1D, $19, $11, $59, $19, $01, $01, $01, $01, $01, $01, $21, $25, $25, $25, $25, $25, $31, $21, $25, $31, $8A, $AA, $AA, $AA, $82, $AA, $EA, $FA, $28, $AA, $AA, $A8, $88, $AA, $AA, $AA
+.byte $01, $01, $05, $09, $0D, $01, $01, $05, $09, $09, $09, $09, $09, $09, $09, $0D, $45, $01, $11, $D9, $19, $01, $01, $11, $15, $15, $15, $15, $15, $15, $15, $19, $01, $01, $11, $D9, $19, $01, $45, $11, $D9, $D9, $D9, $D9, $D9, $D9, $D9, $19, $01, $01, $11, $D9, $19, $01, $01, $11, $D9, $2D, $25, $25, $25, $29, $D9, $19, $45, $01, $11, $D9, $19, $01, $01, $11, $D9, $19, $45, $01, $4D, $11, $D9, $19, $01, $53, $11, $D9, $19, $01, $01, $11, $D9, $19, $01, $49, $01, $11, $D9, $19, $4C, $01, $11, $D9, $39, $09, $09, $35, $D9, $19, $01, $01, $01, $11, $D9, $19, $55, $01, $11, $D9, $D9, $D9, $D9, $D9, $D9, $19, $53, $55, $01, $11, $D9, $19, $01, $01, $11, $D9, $2D, $25, $29, $D9, $2D, $31, $01, $01, $01, $11, $D9, $19, $09, $09, $35, $D9, $19, $01, $11, $D9, $19, $01, $01, $47, $01, $11, $D9, $19, $D9, $D9, $D9, $D9, $19, $01, $11, $D9, $19, $01, $49, $01, $01, $11, $D9, $19, $25, $25, $25, $25, $31, $01, $11, $D9, $19, $01, $01, $01, $01, $11, $D9, $19, $01, $45, $01, $4D, $01, $55, $11, $D9, $39, $09, $09, $09, $0D, $11, $15, $19, $01, $01, $49, $01, $45, $01, $11, $D9, $D9, $D9, $D9, $D9, $19, $11, $59, $19, $01, $01, $01, $01, $01, $01, $21, $25, $25, $25, $25, $25, $31, $21, $25, $31, $8A, $AA, $AA, $AA, $82, $AA, $EA, $FA, $28, $AA, $AA, $A8, $88, $AA, $AA, $AA
 attribute_screen2:
 	.byte $8a,$aa,$aa,$aa,$aa,$aa,$aa,$aa,$82,$ea,$aa,$88,$ea,$fa,$fa,$aa
 	.byte $28,$aa,$aa,$a8,$aa,$20,$a8,$aa,$88,$aa,$aa,$aa,$aa,$08,$aa,$aa
@@ -1057,7 +1139,7 @@ attribute_screen4:
 	.byte $55,$55,$55,$55,$55,$55,$55,$55,$05,$05,$05,$05,$05,$05,$05,$05
 
 walkable_addresses:
-	.byte $05, $12, $14, $15, $16, $17, $18, $19, $1B, $1D, $1E, $1F, $20, $2A, $2C, $2D, $2F, $36, $38, $39, $3B, $FF
+	.byte $05, $12, $14, $15, $16, $17, $18, $19, $1B, $D9, $1E, $1F, $20, $2A, $2C, $2D, $2F, $36, $38, $39, $3B, $D9, $DA, $DB, $DC, $FF
 
 .segment "CHARS"
 .incbin "graphics.chr"
