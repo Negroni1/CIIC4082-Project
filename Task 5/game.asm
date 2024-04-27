@@ -32,10 +32,12 @@
 	scroll_temp: .res 1
 	tempFrogX: .res 1
 	tempFrogY: .res 1
-	; chrTilePtr: .res 2
+	byteIndex: .res 1
+	bitIndex: .res 1
+	temptemp: .res 1
 
-; .segment "BSS"
-; 	tileDataStart: .res 16 ; Reserve 16 bytes for tile data
+.segment "BSS"
+	collision_map: .res 120     ; 960 tiles / 8 tiles per byte = 120 bytes
 
 .segment "STARTUP"
 
@@ -65,8 +67,8 @@
 		BIT $2002
 		BPL vblankwait2
 
-	LDA #$08							; A = 8
-	STA frogX							; Set frog X to 8
+	LDA #$00							; A = 0
+	STA frogX							; Set frog X to 0
 
 	LDA #$80							; A = 136
 	STA frogY							; Set frog Y to 136
@@ -86,20 +88,14 @@
 	STA tileX
 	STA tileY
 	STA TileIndex
-  ; STA chrTilePtr        ; Low byte of CHR tile pointer
-  ; STA tileDataPtr       ; Low byte of RAM tile data pointer
-
-  ; LDA #$10
-  ; STA chrTilePtr+1      ; High byte of CHR tile pointer ($1000)
-
-  ; LDA #$03
-  ; STA tileDataPtr+1     ; High byte of RAM tile data pointer ($0300)
 	
 	LDA #$20
 	STA background_offset_up
 
 	LDA #$25							; A = 25
 	STA frogDirection   	; Set frog Direction to Right (25)
+
+	JSR createCollisionMap
 
   JMP main							; Go to main
 .endproc
@@ -154,147 +150,17 @@
 	ADC #$01    ; Add 1 to tick
 	STA tick    ; Store new tick
 
-	LDA #$00
-	STA tileX
-	STA tileY
-	STA TileIndex
+	; LDA #$00
+	; STA tileX
+	; STA tileY
+	; STA TileIndex
 
-	LDA #$01
-	STA isMoving
+	; LDA #$01
+	; STA isMoving
 
-	; Read and process controller input
-	LDA $4016   ; Read controller 1
-	STA controllerInput    ; Store state in controllerInput variable
-	LDA #$01
-	STA $4016   ; Strobe controller
-	LDA #$00
-	STA $4016   ; Clear strobe, begin reading button states
-
-	LDY #$08    ; Prepare to read 8 buttons
-	LDA #$00    ; Clear A to start
-
-	read_buttons:
-			LDA $4016       ; Read button state
-			LSR             ; Shift right, moving the button's state into carry
-			ROL controllerInput        ; Rotate Left through Carry to move button state into controllerInput
-			DEY
-			BNE read_buttons
-
-			; Check Right
-			LDA controllerInput
-			AND #%00000001  ; Isolate Right button
-			BEQ check_left  ; If not pressed, check next
-			
-			LDA #$25
-			STA frogDirection ; Set frogDirection to 25 (Right)
-
-			JSR checkWalkable
-			CMP #$00
-			BEQ near_done
-
-			LDA frogX
-			CMP #$F8
-			BEQ SkipIncrementRight
-			INC frogX       ; Move right
-			
-			SkipIncrementRight:
-				LDA #$01
-				STA hasMoved ; Set hasMoved to 1
-
-				LDA scroll_temp
-				STA scroll_offset
-				JMP update_done
-
-				JMP update_done
-
-			check_left:
-				LDA controllerInput
-				AND #%00000010  ; Isolate Left button
-				BEQ check_up    ; If 0, button not pressed, check next
-				
-				LDA #$01
-				STA frogDirection ; Set frogDirection to 01 (Left)
-
-				JSR checkWalkable
-				CMP #$00
-				BEQ near_done
-
-				LDA frogX
-				CMP #$00
-				BEQ SkipDecrementLeft
-				DEC frogX       ; Move left
-					
-				SkipDecrementLeft:
-				LDA #$01
-				STA hasMoved ; Set hasMoved to 1
-
-				LDA scroll_temp
-				STA scroll_offset
-				JMP update_done
-
-			check_up:
-				LDA controllerInput
-				AND #%00001000  ; Isolate Up button
-				BEQ check_down  ; If 0, button not pressed, check next
-				
-				LDA #$19
-				STA frogDirection ; Set frogDirection to 19 (Up)
-
-				JSR checkWalkable
-				CMP #$00
-				BEQ update_done
-
-				LDA frogY
-				CMP #$00
-				BEQ SkipDecrementUp
-				DEC frogY       ; Move up
-
-				SkipDecrementUp:
-				LDA #$01
-				STA hasMoved ; Set hasMoved to 1
-
-				JMP update_done
-
-			near_done:
-				JMP update_done
-
-			check_down:
-				LDA controllerInput
-				AND #%00000100  ; Isolate Down button
-				BEQ no_movement ; If also 0, no relevant button not pressed, no movement was done
-				
-				LDA #$0D
-				STA frogDirection ; Set frogDirection to 0D (Down)
-
-				JSR checkWalkable
-				CMP #$00
-				BEQ update_done
-
-				LDA frogY
-				CMP #$E8
-				BEQ SkipIncrementDown
-				INC frogY       ; Move down
-
-				SkipIncrementDown:
-				LDA #$01
-				STA hasMoved ; Set hasMoved to 1
-				
-				JMP update_done
-				
-			no_movement:
-					LDA #$00
-					STA hasMoved ; Set hasMoved to 0
-					STA tileX
-					STA tileY
-					STA TileIndex
-					LDA #$0D
-					STA frogDirection
-					JMP update_done
-
-		update_done:
-				LDA #$00
-				STA isMoving
-    		JSR draw        ; Call Draw function to reflect changes
+	JSR HandleMovement
+  
+	JSR draw        ; Call Draw function to reflect changes
   
 	; Wait for VBlank to end before restoring registers (prevents changes during rendering)
 	WaitEndVBlank:
@@ -323,278 +189,455 @@
 	RTS						; Return from subroutine
 .endproc
 
-.proc readTile ; ------------------------------------------------------------------------------------------+
-	; SAVE REGISTER INTO THE STACK
-	PHP						; Push the Processor Status Register onto the stack
-	PHA						; Push the Accumulator Register onto the stack
-	TXA						; Transfer X into the Accumulator
-	PHA						; Push X (the accumulator register) onto the stack
-	TYA						; Transfer Y into the Accumulator
-	PHA						; Push Y (the accumulator register) onto the stack
+; .proc readTile ; ------------------------------------------------------------------------------------------+
+
+; 	LDA frogX
+; 	STA tempFrogX
+; 	LDA frogY
+; 	STA tempFrogY
+
+; 	;	Directional Branching
+; 	LDA frogDirection
+; 	CMP #$01
+; 	BEQ Left_Tile
 	
-	LDA frogX
-	STA tempFrogX
-	LDA frogY
-	STA tempFrogY
-	LDA scroll_offset
-	STA scroll_temp
+; 	LDA frogDirection
+; 	CMP #$0D
+; 	BEQ Down_Tile
 
-	;	Directional Branching
-	LDA frogDirection
-	CMP #$01
-	BEQ Left_Tile
+; 	LDA frogDirection
+; 	CMP #$19
+; 	BEQ Up_Tile
 	
-	LDA frogDirection
-	CMP #$0D
-	BEQ Down_Tile
+; 	LDA frogDirection
+; 	CMP #$25
+; 	BEQ Right_Tile
+; 	JMP NearExit
 
-	LDA frogDirection
-	CMP #$19
-	BEQ Up_Tile
-	
-	LDA frogDirection
-	CMP #$25
-	BEQ Right_Tile
-	JMP NearExit
+; 	Left_Tile:
+; 			LDA tempFrogX
+; 			CMP #$00
+; 			BEQ NearExit    ; Exit if at boundary
+; 			SEC         ; Set carry for subtraction
+; 			SBC #$08    ; Decrement frogX
+; 			STA tempFrogX
+; 			JMP HandleScrollDecrement
 
-	Left_Tile:
-			LDA tempFrogX
-			; CMP #$00
-			; BEQ NearExit    ; Exit if at boundary
-			SEC         ; Set carry for subtraction
-			SBC #$20    ; Decrement frogX
-			STA tempFrogX
-			JMP HandleScrollDecrement
+; 	Right_Tile:
+; 			LDA tempFrogX
+; 			CMP #$F8    ; Check if frogX is less than 248
+; 			BEQ NearExit
+; 			CLC         ; Clear carry for addition
+; 			ADC #$08    ; Increment frogX
+; 			STA tempFrogX
+; 			JMP HandleScrollIncrement
 
-	Right_Tile:
-			LDA tempFrogX
-			CMP #$F8    ; Check if frogX is less than 248
-			BEQ NearExit
-			CLC         ; Clear carry for addition
-			ADC #$08    ; Increment frogX
-			STA tempFrogX
-			JMP HandleScrollIncrement
+; 	Up_Tile:
+; 			LDA tempFrogY
+; 			CMP #$00
+; 			BEQ NearExit
+; 			SEC         ; Set carry for subtraction
+; 			SBC #$08    ; Decrement frogY
+; 			STA tempFrogY
+; 			JSR Calculate_Index  ; Only need to recalculate indexes
+; 			JMP NearExit
 
-	Up_Tile:
-			LDA tempFrogY
-			CMP #$08
-			BEQ NearExit
-			SEC         ; Set carry for subtraction
-			SBC #$08    ; Decrement frogY
-			STA tempFrogY
-			JSR Calculate_Index  ; Only need to recalculate indexes
-			JMP NearExit
+; 	Down_Tile:
+; 			LDA tempFrogY
+; 			CMP #$E8    ; Check if frogY is less than 232
+; 			BEQ NearExit
+; 			CLC         ; Clear carry for addition
+; 			ADC #$08    ; Increment frogY
+; 			STA tempFrogY
+; 			JSR Calculate_Index  ; Only need to recalculate indexes
+; 			JMP NearExit
 
-	Down_Tile:
-			LDA tempFrogY
-			CMP #$E8    ; Check if frogY is less than 232
-			BEQ NearExit
-			CLC         ; Clear carry for addition
-			ADC #$08    ; Increment frogY
-			STA tempFrogY
-			JSR Calculate_Index  ; Only need to recalculate indexes
-			JMP NearExit
+; 	NearExit:
+; 			JMP Exit  ; Use unconditional jump to reach the actual exit point
 
-	NearExit:
-			JMP Exit  ; Use unconditional jump to reach the actual exit point
+; 	HandleScrollDecrement:
+;     LDA scroll_offset
+;     CMP #$00    ; Check if scroll_offset is lower than 0
+;     BEQ SkipDecrement  ; Skip if decrementing leads to underflow
+;     SEC         ; Set carry for subtraction
+;     SBC #$01    ; Decrement scroll_offset
+;     STA scroll_temp    ; Update the temporal state if everything is fine
+; 	SkipDecrement:
+;     JSR Calculate_Index  ; Use the updated value for calculation
+; 		JMP Exit
 
-	HandleScrollDecrement:
-    LDA scroll_offset
-    CMP #$00    ; Check if scroll_offset is lower than 0
-    BEQ SkipDecrement  ; Skip if decrementing leads to underflow
-    SEC         ; Set carry for subtraction
-    SBC #$01    ; Decrement scroll_offset
-    STA scroll_temp    ; Update the temporal state if everything is fine
-	SkipDecrement:
-    JSR Calculate_Index  ; Use the updated value for calculation
-		JMP Exit
+; 	HandleScrollIncrement:
+;     LDA scroll_offset
+;     CMP #$FF    ; Check if scroll_offset is greater than 255
+;     BEQ SkipIncrement  ; Skip if incrementing leads to overflow
+;     CLC         ; Clear carry for addition
+;     ADC #$01    ; Increment scroll_offset
+;     STA scroll_temp    ; Update the temporal state if everything is fine
+; 	SkipIncrement:
+;     JSR Calculate_Index  ; Use the updated value for calculation
+; 		JMP Exit
 
-	HandleScrollIncrement:
-    LDA scroll_offset
-    CMP #$FF    ; Check if scroll_offset is greater than 255
-    BEQ SkipIncrement  ; Skip if incrementing leads to overflow
-    CLC         ; Clear carry for addition
-    ADC #$01    ; Increment scroll_offset
-		STA temp
-    STA scroll_temp    ; Update the temporal state if everything is fine
-	SkipIncrement:
-    JSR Calculate_Index  ; Use the updated value for calculation
-		JMP Exit
+; 	Calculate_Index:
 
-	Calculate_Index:
+; 		; LDA scroll_temp
+;     ; LSR A
+;     ; LSR A
+;     ; LSR A
+; 		; STA temp
 
-		LDA scroll_temp
-    LSR A
-    LSR A
-    LSR A
-		STA temp
+;     LDA tempFrogX
+;     ; CLC
+;     ; ADC #$08
+;     ; ADC scroll_offset
+;     ; LSR A
+;     ; LSR A
+;     ; LSR A
+; 		; CLC
+; 		; ADC temp
+;     STA tileX
 
-    LDA tempFrogX
-    CLC
-    ; ADC $00
-    ; ADC scroll_offset
-    LSR A
-    LSR A
-    LSR A
-		CLC
-		ADC temp
-    STA tileX
+;     LDA tempFrogY
+;     ; CLC
+;     ; ADC #$08
+;     ; LSR A
+;     ; LSR A
+;     ; LSR A
+;     STA tileY
 
-    LDA tempFrogY
-    CLC
-    ADC #$08
-    LSR A
-    LSR A
-    LSR A
-    STA tileY
+; 		; Wrap TileX within 0 to 31
+;     ; LDA tileX
+;     ; CMP #$1F       ; Compare with 31
+;     ; BCC TileXOK    ; If less than 31, it's OK
+;     ; LDA #$1E       ; Set to 30 if exceeded
 
-		; Wrap TileX within 0 to 31
-    LDA tileX
-    AND #$1F       ; Wrap around if exceeded 31
-    STA tileX
+; 		; TileXOK:
+;     ; STA tileX
 
-    ; Ensure TileY is within 0 to 29
-    LDA tileY
-    CMP #$1E       ; Compare with 30
-    BCC TileYOK    ; If less than 30, it's OK
-    LDA #$1D       ; Set to 29 if exceeded
+;     ; Ensure TileY is within 0 to 29
+;     ; LDA tileY
+;     ; CMP #$1E       ; Compare with 30
+;     ; BCC TileYOK    ; If less than 30, it's OK
+;     ; LDA #$1D       ; Set to 29 if exceeded
 
-		TileYOK:
-    STA tileY
+; 		; TileYOK:
+;     ; STA tileY
 
-    JSR Calculate_Next_Tile
-    RTS
+;     JSR Calculate_Next_Tile
+;     RTS
 
-	Calculate_Next_Tile:
-    ; Load tileY into $00 and set $01 to zero to start
-    LDA tileY
-    STA $00    ; $00 will hold the low byte of the result
-    LDA #$00
-    STA $01    ; $01 will hold the high byte of the result
+; 	Calculate_Next_Tile:
+; 		; Formula for Byte Index: X/8/8 + Y/8 * 4
+; 		LDA tileX
+; 		LSR A					; TileX / 2
+; 		LSR A					; TileX / 4
+; 		LSR A					; TileX / 8
+; 		LSR A					; TileX / 16
+; 		LSR A					; TileX / 32
+; 		LSR A					; TileX / 64
+; 		STA $00
 
-    ; We need to add tileY to itself 5 times (tileY * 32 = tileY * (2^5))
-    LDY #$05   ; Set the loop counter to 5 for the number of additions needed
-
-		; LDA scroll_offset
-		; SEC
-		; SBC $80
-		; BMI multiply_loop
-
-		; DEY
-
-		multiply_loop:
-    CLC        ; Clear carry before addition
-    LDA $00
-    ADC $00    ; Add $00 to itself (low byte)
-    STA $00    ; Store back the result into $00
-    LDA $01
-    ADC $01    ; Add $01 to itself (high byte), with carry from low byte addition
-    STA $01    ; Store back the result into $01
-
-    DEY        ; Decrement the loop counter
-    BNE multiply_loop  ; If Y is not zero, repeat the loop
-
-    ; At this point, $00 and $01 contain the result of tileY * 32 or tileY * 16, depending on offset
-    ; $00 holds the low byte, $01 holds the high byte
-		LDA $01
-		STA PPUHigh
-		LDA $00
-		STA PPULow
-
-		; Prepare the high byte of the PPU address
-    LDA PPUHigh       ; Start with the base address high byte $20 (for $2000)
-    CLC
-		ADC #$20
-    STA PPUHigh        ; Store adjusted high byte of PPU address
-
-		; Prepare the low byte of the PPU address
-    LDA PPULow       ; Start with the base address high byte $20 (for $2000)
-    CLC
-		ADC tileX
-    STA PPULow        ; Store adjusted high byte of PPU address
-
-		; Ensure we're in VBlank to safely set PPU addresses and read data
-    ; waitForVBlank:
-    ;   BIT $2002
-    ;   BPL waitForVBlank
+; 		LDA tileY
+; 		LSR A					; TileY / 2
+; 		LSR A					; TileY / 4
+; 		LSR A					; TileY / 8
 		
-		; Sometimes the result could be affected by other changes
-		; therefore, repeat the calculation until we get a valid value
-		Read_Loop:
-			LDA $2002
-			LDA PPUHigh
-			STA $2006          ; Set high byte of PPU address
-			LDA PPULow
-			STA $2006          ; Set low byte of PPU address
+; 		ASL A					; (TileY/8) * 2
+; 		ASL A					; (TileY/8) * 4
+		
+; 		CLC
+; 		ADC $00				; ((TileY/8) * 4) + (TileX / 64)
+; 		STA byteIndex
 
-			LDA $2002
-			LDA $2007				 ; The first read from $2007 is invalid
-			LDA $2007
-			STA TileIndex
+; 		; Formula for Bit Index: X/8 AND %0111
+; 		LDA tileX
+; 		LSR A					; TileX / 2
+; 		LSR A					; TileX / 4
+; 		LSR A					; TileX / 8
+; 		AND #%0111		; Bitmask index
+; 		STA bitIndex
 
-			LDA TileIndex
-			CMP #$FF
-			BEQ Read_Loop
+; 		RTS
+
+; 	Exit:
+; 		LDA #$00
+; 		STA isMoving
+; .endproc
+
+.proc HandleMovement
+	; Read and process controller input
+	LDA $4016   ; Read controller 1
+	STA controllerInput    ; Store state in controllerInput variable
+	LDA #$01
+	STA $4016   ; Strobe controller
+	LDA #$00
+	STA $4016   ; Clear strobe, begin reading button states
+
+	LDY #$08    ; Prepare to read 8 buttons
+	LDA #$00    ; Clear A to start
+
+	read_buttons:
+			LDA $4016       ; Read button state
+			LSR             ; Shift right, moving the button's state into carry
+			ROL controllerInput        ; Rotate Left through Carry to move button state into controllerInput
+			DEY
+			BNE read_buttons
+
+			; Check Right
+			LDA controllerInput
+			AND #%00000001  ; Isolate Right button
+			BEQ check_left  ; If not pressed, check next
 			
-			LDA TileIndex
-			CMP #$00
-			BEQ Read_Loop
+			check_right:
+				LDA #$25
+				STA frogDirection ; Set frogDirection to 25 (Right)
 
-			LDA $2002
+				LDA frogX
+				CMP #$FF
+				BEQ near_done
+				
+				LDA frogX
+				INC frogX       ; Move right
 
-			LDA scroll_offset
-			STA $2005
-			LDA #$00
-			STA $2005
-		RTS
+				LDA scroll_offset
+    		CMP #$FF    ; Check if scroll_offset is greater than 255
+    		BEQ SkipIncrement  ; Skip if incrementing leads to overflow
+    		CLC         ; Clear carry for addition
+    		ADC #$01    ; Increment scroll_offset
+    		STA scroll_offset
 
-	Exit:
-    ; [Restore Registers]
-		LDA #$00
-		STA PPUHigh
-		STA PPULow
-    STA $2006          ; Set high byte of PPU address
-    STA $2006          ; Set low byte of PPU address
+				JSR CheckCollisionsOnSprite
+				CMP #$01
+				BEQ right_collision_with_scroll
+				
+				SkipIncrement:
+				JSR CheckCollisionsOnSprite
+				CMP #$01
+				BEQ right_collision
+				JMP update_done
+				
+				right_collision_with_scroll:
+				LDA scroll_offset
+				DEC scroll_offset
+				right_collision:
+				DEC frogX
+				JMP update_done
+				
 
-		LDA scroll_offset
-		STA $2005
-		LDA #$00
-		STA $2005
+			check_left:
+				LDA controllerInput
+				AND #%00000010  ; Isolate Left button
+				BEQ check_up    ; If 0, button not pressed, check next
+				
+				LDA #$01
+				STA frogDirection ; Set frogDirection to 01 (Left)
 
+				LDA frogX
+				CMP #$00
+				BEQ update_done
+				
+				LDA frogX 
+				DEC frogX
+
+				LDA scroll_offset
+    		CMP #$00    ; Check if scroll_offset is 0
+    		BEQ SkipDecrement  ; Skip if decrementing leads to overflow
+    		SEC         ; Set carry for subtraction
+    		SBC #$01    ; Decrease scroll_offset
+    		STA scroll_offset
+
+				JSR CheckCollisionsOnSprite
+				CMP #$01
+				BEQ left_collision_with_scroll
+
+				SkipDecrement:
+				JSR CheckCollisionsOnSprite
+				CMP #$01
+				BEQ left_collision
+				JMP update_done
+				
+				left_collision_with_scroll:
+				LDA scroll_offset
+				INC scroll_offset
+				left_collision:
+				INC frogX
+				JMP update_done
+
+			near_done:
+				JMP update_done
+
+			check_up:
+				LDA controllerInput
+				AND #%00001000  ; Isolate Up button
+				BEQ check_down    ; If 0, button not pressed, check next
+				
+				LDA #$19
+				STA frogDirection ; Set frogDirection to 19 (Up)
+
+				LDA frogY
+				CMP #$00
+				BEQ update_done
+				
+				LDA frogY 
+				DEC frogY
+
+				JSR CheckCollisionsOnSprite
+				CMP #$01
+				BEQ up_collision
+				JMP update_done
+				
+				up_collision:
+				INC frogY
+				JMP update_done
+
+			check_down:
+				LDA controllerInput
+				AND #%00000100  ; Isolate Down button
+				BEQ no_movement
+				
+				LDA #$0D
+				STA frogDirection ; Set frogDirection to 0D (Down)
+
+				LDA frogY
+				CMP #$E8
+				BEQ update_done
+				
+				LDA frogY 
+				INC frogY
+
+				JSR CheckCollisionsOnSprite
+				CMP #$01
+				BEQ down_collision
+				JMP update_done
+				
+				down_collision:
+				DEC frogY
+				JMP update_done
+				
+			no_movement:
+					LDA #$00
+					STA hasMoved ; Set hasMoved to 0
+					; STA tileX
+					; STA tileY
+					; STA TileIndex
+					LDA #$0D
+					STA frogDirection
+					JMP update_done
+
+	update_done:
 		LDA #$00
 		STA isMoving
-
-    PLA
-    TAY
-    PLA
-    TAX
-    PLA
-    PLP
-    RTS
+		RTS
 .endproc
 
-.proc checkWalkable ; ------------------------------------------------------------------------------------------+
-	JSR readTile
-	JMP CheckWalkable
+.proc CheckCollisionsOnSprite ; ------------------------------------------------------------------------------------------+
+    ; Top-Left Corner
+		LDA frogX
+    STA tileX
+		STA tempFrogX
+    LDA frogY
+    STA tileY
+		STA tempFrogY
+    JSR CalculateTileIndex
+    JSR CheckCollision
+    BNE HandleCollision
 
-	FoundTile:
-		LDA #$01 							; Return 1
-		RTS
+		; Top-Right corner
+    LDA tempFrogX
+    CLC
+    ADC #8      ; Add 8 pixels to check the right side of the sprite
+    STA tileX
+    LDA frogY
+    STA tileY
+    JSR CalculateTileIndex
+    JSR CheckCollision
+    BNE HandleCollision
 
-	TileNotFound:
-		LDA #$00 							; Return 0
-		RTS
+    ; Bottom-Left corner
+		LDA frogX
+    STA tempFrogX
+    LDA tempFrogY
+    CLC
+    ADC #8      ; Add 8 pixels to check the bottom side of the sprite
+    STA tileY
+    JSR CalculateTileIndex
+    JSR CheckCollision
+    BNE HandleCollision
 
-	LDX #$00         				; Start of the table
-	CheckWalkable:
-			LDA walkable_addresses, X
-			CMP #$FF     				; Let's say $FF marks the end of your walkable tile list
-			BEQ TileNotFound
-			CMP TileIndex 			; Compare with the fetched tile index
-			BEQ FoundTile  			; Branch if it is a walkable tile
-			INX
-			JMP CheckWalkable
-			
+    ; Bottom-Right corner
+    LDA tempFrogX
+    ADC #8      ; Add 8 pixels to check the right side
+    STA tileX
+    JSR CalculateTileIndex
+    JSR CheckCollision
+    BNE HandleCollision
+
+    ; No collision detected
+		LDA #$00
+    RTS
+
+		HandleCollision:
+    LDA #$01
+    RTS
+
+.endproc
+
+.proc CalculateTileIndex ; ------------------------------------------------------------------------------------------+
+		; Formula for Byte Index: X/8/8 + Y/8 * 4
+		LDA tileX
+		LSR A					; TileX / 2
+		LSR A					; TileX / 4
+		LSR A					; TileX / 8
+		LSR A					; TileX / 16
+		LSR A					; TileX / 32
+		LSR A					; TileX / 64
+		STA $00
+
+		LDA tileY
+		LSR A					; TileY / 2
+		LSR A					; TileY / 4
+		LSR A					; TileY / 8
+		
+		ASL A					; (TileY/8) * 2
+		ASL A					; (TileY/8) * 4
+		
+		CLC
+		ADC $00				; ((TileY/8) * 4) + (TileX / 64)
+		STA byteIndex
+
+		; Formula for Bit Index: X/8 AND %0111
+		LDA tileX
+		LSR A					; TileX / 2
+		LSR A					; TileX / 4
+		LSR A					; TileX / 8
+		AND #%0111		; Bitmask index
+		STA bitIndex
+
+		RTS	
+.endproc
+
+; .proc CheckCollision
+;     LDY byteIndex       ; Load the index for the collision map byte
+;     LDA col_map, Y      ; Load the byte from the collision map
+
+;     LDY bitIndex        ; Load the index for the bitmask
+;     LDA BitMask, Y      ; Load the bitmask from the BitMask array
+    
+;     AND #$FF            ; Correct usage, applies the previously loaded bitmask directly to A
+;     STA TileIndex       ; Store the result which indicates collision if non-zero
+;     RTS
+; .endproc
+
+
+
+.proc CheckCollision ; ------------------------------------------------------------------------------------------+
+	LDY byteIndex
+	LDX bitIndex
+
+	LDA col_map, Y
+	AND BitMask, X
+	STA TileIndex
+
+	RTS
 .endproc
 
 .proc draw ; ------------------------------------------------------------------------------------------+
@@ -763,7 +806,6 @@
 	PLP						; Pull the top value of the stack and place it into the  processor status register
 	RTS						; Return from subroutine
 .endproc
-
 
 .proc drawBackground
     ; Save register states to the stack
@@ -1054,6 +1096,18 @@
     RTS
 .endproc
 
+.proc createCollisionMap ; -------------------------------------------------------------------------+
+	LDX #$00         				; Start of the table
+	; CheckWalkable:
+	; 		LDA walkable_addresses, X
+	; 		CMP #$FF     				; $FF marks the end of walkable tile list
+	; 		BEQ TileNotFound
+	; 		CMP TileIndex 			; Compare with the fetched tile index
+	; 		BEQ FoundTile  			; Branch if it is a walkable tile
+	; 		INX
+	; 		JMP CheckWalkable
+.endproc
+
 .proc main ; -------------------------------------------------------------------------+
     LDX $2002           ; Load PPU Status into X
     LDX #$3f            ; Load 3f into X
@@ -1140,6 +1194,48 @@ attribute_screen4:
 
 walkable_addresses:
 	.byte $05, $12, $14, $15, $16, $17, $18, $19, $1B, $D9, $1E, $1F, $20, $2A, $2C, $2D, $2F, $36, $38, $39, $3B, $D9, $DA, $DB, $DC, $FF
+
+col_map:
+	.byte %11111111, %11111111, %11111111, %11111111
+	.byte %11111111, %11111111, %11111111, %11111111
+	.byte %10000000, %00000000, %00000000, %11000001
+	.byte %10000000, %00000000, %00000000, %11000001
+	.byte %10000000, %00000000, %00000000, %11000001
+	.byte %10000000, %00000000, %00000000, %11000001
+	.byte %10000000, %00000000, %00000000, %11000001
+	.byte %11111000, %01111111, %10000010, %11000001
+	.byte %11111000, %01111111, %10000010, %11000001
+	.byte %11111000, %01111111, %10000010, %11000001
+	.byte %11111000, %01111111, %10000011, %11000001
+	.byte %11111000, %01111000, %00000000, %00000001
+	.byte %11111000, %01111000, %10000000, %00000001
+	.byte %11111000, %01111000, %10000000, %00111111
+	.byte %11111000, %01111000, %10000000, %00000000
+	.byte %11111000, %01111000, %10000000, %00000000
+	.byte %00000000, %01111000, %10000000, %00000000
+	.byte %00000000, %01111000, %10000000, %00000000
+	.byte %11111111, %11111000, %10000000, %00000000
+	.byte %11111111, %11111000, %10000000, %00000000
+	.byte %11111111, %11111000, %00000000, %00000000
+	.byte %11111111, %11111000, %00000000, %00000000
+	.byte %11111111, %11111111, %10000111, %11111111
+	.byte %11111111, %11111111, %10000111, %11111111
+	.byte %11111111, %11111111, %10000111, %11111111
+	.byte %11111111, %11111111, %10000111, %11111111
+	.byte %10000000, %00000000, %00000000, %11111111
+	.byte %10000000, %00000000, %00000000, %11111111
+	.byte %11111111, %11111111, %11111111, %11111111
+	.byte %11111111, %11111111, %11111111, %11111111
+
+BitMask:
+	.byte %10000000
+	.byte %01000000
+	.byte %00100000
+	.byte %00010000
+	.byte %00001000
+	.byte %00000100
+	.byte %00000010
+	.byte %00000001
 
 .segment "CHARS"
 .incbin "graphics.chr"
