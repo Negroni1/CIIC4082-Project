@@ -8,6 +8,14 @@
 .byte $00                   ; NTSC format
 
 .segment "ZEROPAGE"
+	frogX: 					.res 1	; Reserve 1 byte for the sprite position in X
+	frogY: 					.res 1	; Reserve 1 byte for the sprite position in X
+	frogDirection: 			.res 1	; Reserve 1 byte for the sprite direction
+	animationState:			.res 1	; Reserve 1 byte for the animation state for the FSM
+	tick:					.res 1	; Reserve 1 byte for the a tick counter (frame counter)
+	frogOffSet:				.res 1	; Reserve 1 byte for the frog off-set, to be able to add multiple frogs on the screen (on different memory)
+	directionOffSet:		.res 1	; Reserve 1 byte for the frog direction off-set, to able to have multiple frogs w/ different direction/orientation
+
 	temp: 						.res 1
 	scroll_offset:				.res 1
 	level_change:				.res 1
@@ -19,6 +27,12 @@
 	counter_2:					.res 1
 	counter_3:					.res 1
 	counter_offset:				.res 1
+	stageClearState:			.res 1
+	timer_stage1_counter1:		.res 1
+	timer_stage1_counter2:		.res 1
+	timer_stage1_counter3:		.res 1
+	counter_Y:					.res 1
+	counter_X:					.res 1
 
 .segment "STARTUP"
 
@@ -41,13 +55,15 @@
 	JSR update	
 	JSR drawCounter
 	JSR drawGameOver
+	JSR drawStageClear
+	; JSR draw
  
 	LDA scroll_offset
 	STA $2005
 	LDA #$00
 	STA $2005
 	LDX #$00
-	
+
 	LDA level_change
 	CMP #$01
 	BNE continue
@@ -82,6 +98,8 @@
 	STX background_offset_low
 	STX background_tile_offset
 	STX counter_offset
+	STX stageClearState
+	STX counter_Y
 	LDX #$20
 	STX background_offset_up
 	LDX #$01
@@ -90,10 +108,49 @@
 	STX counter_2
 	LDX #$03
 	STX counter_1
+	LDX #$D0
+	STX counter_X
+
+	LDA #$00				; A = 0
+	STA frogX				; Set frog X to 0
+	STA frogY				; Set frog Y to 0
+	STA animationState		; Set animation state to 0
+	STA tick				; Set tick to 0
+	STA frogOffSet			; Set frog memory allocation offset to 0
+	STA directionOffSet		; Set frog direction offset to 0
+    STA frogDirection   	; Set frog Direction to 0
+	
 	
     JMP main
 .endproc
+.proc draw ; ------------------------------------------------------------------------------------------+
+	; SAVE REGISTER INTO THE STACK
+	PHP						; Push the Processor Status Register onto the stack
+	PHA						; Push the Accumulator Register onto the stack
+	TXA						; Transfer X into the Accumulator
+	PHA						; Push X (the accumulator register) onto the stack
+	TYA						; Transfer Y into the Accumulator
+	PHA						; Push Y (the accumulator register) onto the stack
 
+	; DRAW FROG DOWN
+	LDA #$0D          		
+    STA frogDirection   	; Set frogDirection to 0D (Down)
+	LDA #$70          		
+    STA frogX				; Set frog X position to 80
+    LDA #$20           		
+    STA frogY				; Set frog Y position to 60
+	JSR drawFrog		; Call drawAnimation
+
+
+	; RESTORE REGISTERS & RETURN
+	PLA						; Pull Y of the stack and place it into the accumulator	register
+	TAY						; Restore/Transfer the accumulator into Y
+	PLA						; Pull X of the stack and place it into the accumulator	register
+	TAX						; Restore/Transfer the accumulator into X
+	PLA						; Pull the top value of the stack and place it into the accumulator register
+	PLP						; Pull the top value of the stack and place it into the  processor status register
+	RTS						; Return from subroutine
+.endproc
 .proc update
 	; SAVE REGISTER INTO THE STACK
 	PHP						; Push the Processor Status Register onto the stack
@@ -111,6 +168,9 @@
 	STA tick_counter
 	JMP controller
 	change_counter:
+		LDA stageClearState
+		CMP #$02
+		BEQ controller
 		LDA #$00
 		STA tick_counter
 		LDA counter_1
@@ -127,9 +187,9 @@
 			check:
 			LDA counter_3
 			CMP #$00
-			BEQ continue
+			BEQ to_continue	
 			dec_:
-			LDA #$01
+			LDA #$09
 			STA counter_1
 			LDA counter_2
 			CMP #$00
@@ -140,13 +200,15 @@
 				LDA counter_3
 				CMP #$00
 				BEQ continue
-				LDA #$02
+				LDA #$09
 				STA counter_2
 				LDA counter_3
 				CMP #$00
 				BEQ continue
 				DEC counter_3
-
+			JMP controller
+			to_continue:
+				JMP continue
 
 	controller:
 		LDA $4016   ; Read controller 1
@@ -198,10 +260,77 @@
 			STA level_change
 			LDA #$00
 			STA scroll_offset
-		
 
+			LDA stageClearState
+			CLC
+			ADC #$01
+			STA stageClearState
+
+			LDA stageClearState
+			CMP #$02
+			BEQ continue
+
+			LDX #$00
+			STX counter_3
+			LDX #$06
+			STX counter_2
+			LDX #$00
+			STX counter_1
+	
 	continue:
 	
+	; RESTORE REGISTERS & RETURN
+	PLA						; Pull Y of the stack and place it into the accumulator	register
+	TAY						; Restore/Transfer the accumulator into Y
+	PLA						; Pull X of the stack and place it into the accumulator	register
+	TAX						; Restore/Transfer the accumulator into X
+	PLA						; Pull the top value of the stack and place it into the accumulator register
+	PLP						; Pull the top value of the stack and place it into the  processor status register
+	RTS						; Return from subroutine
+.endproc
+
+
+.proc drawStageClear
+	; SAVE REGISTER INTO THE STACK
+	PHP						; Push the Processor Status Register onto the stack
+	PHA						; Push the Accumulator Register onto the stack
+	TXA						; Transfer X into the Accumulator
+	PHA						; Push X (the accumulator register) onto the stack
+	TYA						; Transfer Y into the Accumulator
+	PHA						; Push Y (the accumulator register) onto the stack
+
+	LDA stageClearState
+	CMP #$02
+	BNE exit
+
+	LDX #$88
+	STX counter_X
+	STX counter_Y
+
+	LDX counter_1
+	CLC
+	ADC timer_stage1_counter1
+	
+
+	LDX #$00
+	stage_clear:
+		LDA stageClear,X
+		STA $0200,X
+		INX
+		CPX #$38
+		BNE stage_clear
+	
+	; LDA #$0D          		
+    ; STA frogDirection   	; Set frogDirection to 0D (Down)
+	; LDA #$70          		
+    ; STA frogX				; Set frog X position to 80
+    ; LDA #$20           		
+    ; STA frogY				; Set frog Y position to 60
+	; JSR drawAnimation		; Call drawAnimation
+
+
+	exit:
+
 	; RESTORE REGISTERS & RETURN
 	PLA						; Pull Y of the stack and place it into the accumulator	register
 	TAY						; Restore/Transfer the accumulator into Y
@@ -262,7 +391,7 @@
 
 	LDX counter_offset
 	
-	LDA #$00
+	LDA counter_Y
 	STA $0200, X    
 	LDA counter_3
 	CLC
@@ -270,10 +399,10 @@
 	STA $0201, X     
 	LDA #$02
 	STA $0202, X         
-	LDA #$D0
+	LDA counter_X
 	STA $0203, X  
 
-	LDA #$00
+	LDA counter_Y
 	STA $0204, X         
 	LDA counter_2
 	CLC
@@ -281,19 +410,23 @@
 	STA $0205, X      
 	LDA #$02
 	STA $0206, X         
-	LDA #$D8
+	LDA counter_X
+	CLC
+	ADC #$08
 	STA $0207, X 
 
 
-	LDA #$00
-	STA $0208        
+	LDA counter_Y
+	STA $0208, X       
 	LDA counter_1
 	CLC
 	ADC #$40
 	STA $0209, X      
 	LDA #$02
 	STA $020A, X         
-	LDA #$E0
+	LDA counter_X
+	CLC
+	ADC #$10
 	STA $020B, X  
 
 	LDA counter_offset
@@ -310,7 +443,152 @@
 	RTS						; Return from subroutine
 .endproc
 
+.proc drawAnimation ; ------------------------------------------------------------------------------------------+
+	; SAVE REGISTER INTO THE STACK
+	PHP							; Push the Processor Status Register onto the stack
+	PHA							; Push the Accumulator Register onto the stack
+	TXA							; Transfer X into the Accumulator
+	PHA							; Push X (the accumulator register) onto the stack
+	TYA							; Transfer Y into the Accumulator
+	PHA							; Push Y (the accumulator register) onto the stack
 
+	LDA tick					; Load current tick
+	CMP #$1E
+	BEQ changeAnimation			; Go to changeAnimation if tick is 30
+	JMP continue				; Else continue (go to drawFrog)
+	changeAnimation:
+		LDA #$00
+		STA tick				; Set tick to 0
+		LDA animationState
+		CLC
+		ADC #$01
+		STA animationState 		; Add 1 to the animation state
+		LDA animationState
+		CMP #$01
+		BEQ stateIncrement		; If animation state is 1 go to state increment
+		CMP #$03
+		BEQ stateIncrement		; If animation state is 3 go to state increment
+		CMP #$05
+		BEQ stateDecrement		; If animation state is 5 go to state decrement
+		JMP continue
+
+		stateIncrement:
+			LDA directionOffSet
+			CLC
+			ADC #$04     
+			STA directionOffSet	; Increase direction offset by four (1 tile)
+			LDA animationState
+			CLC
+			ADC #$01
+			STA animationState 	; Add 1 to animation state (transition state, with for another tick)
+			JMP continue
+
+		stateDecrement:
+			LDA directionOffSet
+			CLC
+			SBC #$07   
+			STA directionOffSet	; Set direction offset to original direction
+			LDA #$00
+			STA animationState 	; Set state to first (original state)
+			JMP continue
+    
+	continue:
+		JSR drawFrog       ; Draw the frog
+
+    ; RESTORE REGISTERS & RETURN
+	PLA						; Pull Y of the stack and place it into the accumulator	register
+	TAY						; Restore/Transfer the accumulator into Y
+	PLA						; Pull X of the stack and place it into the accumulator	register
+	TAX						; Restore/Transfer the accumulator into X
+	PLA						; Pull the top value of the stack and place it into the accumulator register
+	PLP						; Pull the top value of the stack and place it into the  processor status register
+	RTS						; Return from subroutine
+.endproc
+
+.proc drawFrog	; ------------------------------------------------------------------------------------------+
+	; SAVE REGISTER INTO THE STACK
+	PHP						; Push the Processor Status Register onto the stack
+	PHA						; Push the Accumulator Register onto the stack
+	TXA						; Transfer X into the Accumulator
+	PHA						; Push X (the accumulator register) onto the stack
+	TYA						; Transfer Y into the Accumulator
+	PHA						; Push Y (the accumulator register) onto the stack
+
+	LDA frogDirection
+	CLC
+	ADC directionOffSet
+	STA frogDirection		; Add direction offset to the frog direction
+
+	LDX frogOffSet			; Load frog offset to X
+
+	; DRAW UPPER LEFT TILE
+	LDA frogY
+	STA $0200, X        
+	LDA frogDirection
+	STA $0201, X      
+	LDA #$00
+	STA $0202, X        
+	LDA frogX
+	STA $0203, X  
+
+	; DRAW UPPER RIGHT TILE
+	LDA frogY 
+	STA $0204, X    
+	LDA frogDirection
+	CLC
+	ADC #$01     
+	STA $0205, X      
+	LDA #$00
+	STA $0206, X         
+	LDA frogX
+	CLC
+	ADC #$08
+	STA $0207, X 
+
+	; DRAW LOWER LEFT TILE
+	LDA frogY		
+	CLC
+	ADC #$08
+	STA $0208, X        
+	LDA frogDirection
+	CLC
+	ADC #$02
+	STA $0209, X      
+	LDA #$01
+	STA $020A, X         
+	LDA frogX
+	STA $020B, X
+
+	; DRAW LOWER RIGHT TILE
+	LDA frogY				
+	CLC
+	ADC #$08
+	STA $020C, X        
+	LDA frogDirection
+	CLC
+	ADC #$03
+	STA $020D, X      
+	LDA #$01
+	STA $020E, X         
+	LDA frogX				
+	CLC
+	ADC #$08
+	STA $020F, X
+
+	LDA frogOffSet
+	CLC
+	ADC #$10
+	STA frogOffSet 			; Increase frog offset by 16  
+
+	; RESTORE REGISTERS & RETURN
+	PLA						; Pull Y of the stack and place it into the accumulator	register
+	TAY						; Restore/Transfer the accumulator into Y
+	PLA						; Pull X of the stack and place it into the accumulator	register
+	TAX						; Restore/Transfer the accumulator into X
+	PLA						; Pull the top value of the stack and place it into the accumulator register
+	PLP						; Pull the top value of the stack and place it into the  processor status register
+	RTS						; Return from subroutine
+.endproc
 .proc drawBackground
     ; Save register states to the stack
     PHP
@@ -319,23 +597,20 @@
     PHA
     TYA
     PHA
-
     ; WRITE BACKGROUND DATA ---------------------------------------------------------------+
-	LDX #$00
+	LDX 00
 	STX background_tile_offset
 	; ; BACKGROUND 1 ----------------------------------------------------------------------+
 	; ; ; UPPER ---------------------------------------------------------------------------+
 	LDA level_change
 	CMP #$01
 	BNE bg
-
 	vblankwait_off:         ; wait for another vblank before continuing
         BIT $2002       ; 2002 = PPU status
         BPL vblankwait_off
 		LDA #%00000000  ; turn on NMIs, sprites use first pattern table
 		STA $2000       ; Store A in PPU Control
 		LDA #%00000000  ; turn on screen
-		LDA #%00010110
 		STA $2001       ; Store A in PPU Mask
 
 		LDA #$20
@@ -441,7 +716,6 @@
 	LDX #$24
 	STX background_offset_up
 
-
 	background2:
 		LDA background_offset_up
 		STA $2006
@@ -455,7 +729,7 @@
 			LDA level_change
 			CMP #$01
 			BNE screen2_up
-			LDA background_screen3, X 
+			LDA background_screen4, X 
 			JMP screen2_con
 			screen2_up:
 			LDA background_screen2, X 
@@ -598,6 +872,7 @@
     RTS
 .endproc
 
+
 .proc main ; -------------------------------------------------------------------------+
     LDX $2002           ; Load PPU Status into X
 
@@ -633,16 +908,34 @@
 		.byte $2C, $0f, $17, $3B    ; green, black, green, green
 		.byte $2C, $0f, $25, $20
 		.byte $2C, $00, $00, $00
+
 	gameOver:
 		.byte $68, $60, $02, $60 	; G
 		.byte $68, $61, $02, $70 	; A
 		.byte $68, $62, $02, $80 	; M
 		.byte $68, $63, $02, $90 	; E
+		.byte $78, $65, $02, $60 	; O
+		.byte $78, $66, $02, $70 	; V
+		.byte $78, $67, $02, $80 	; E
+		.byte $78, $68, $02, $90 	; R
 
-		.byte $78, $64, $02, $60 	; O
-		.byte $78, $65, $02, $70 	; V
-		.byte $78, $66, $02, $80 	; E
-		.byte $78, $67, $02, $90 	; R
+	stageClear:
+		.byte $68, $50, $02, $60 	; S
+		.byte $68, $51, $02, $70 	; T
+		.byte $68, $52, $02, $80 	; A
+		.byte $68, $53, $02, $90 	; G
+		.byte $68, $54, $02, $A0 	; E
+		.byte $78, $56, $02, $60 	; C
+		.byte $78, $57, $02, $70 	; L
+		.byte $78, $58, $02, $80 	; E
+		.byte $78, $59, $02, $90 	; A
+		.byte $78, $5A, $02, $A0 	; R
+		.byte $88, $51, $02, $60	; T
+		.byte $88, $69, $02, $68	; I
+		.byte $88, $62, $02, $70	; M
+		.byte $88, $63, $02, $78	; E
+
+
 background_screen1:
 	.byte $05, $09, $09, $09, $09, $09, $09, $09, $09, $09, $0D, $01, $05, $09, $09, $0D, $11, $1D, $1D, $1D, $15, $1D, $1D, $1D, $1D, $15, $19, $01, $11, $15, $15, $19, $11, $1D, $15, $1D, $1D, $1D, $15, $1D, $1D, $1D, $19, $01, $11, $15, $15, $19, $21, $25, $29, $1D, $2D, $25, $25, $25, $29, $1D, $19, $01, $11, $15, $15, $19, $45, $01, $11, $1D, $19, $01, $05, $09, $35, $1D, $39, $09, $35, $15, $15, $19, $01, $53, $11, $1D, $19, $01, $11, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $01, $01, $11, $1D, $19, $01, $11, $1D, $2D, $25, $29, $1D, $2D, $25, $25, $31, $09, $09, $35, $1D, $19, $01, $11, $1D, $19, $3D, $11, $1D, $19, $01, $01, $01, $1D, $1D, $1D, $1D, $19, $01, $11, $1D, $19, $41, $11, $1D, $19, $01, $01, $01, $25, $25, $25, $25, $31, $01, $11, $1D, $39, $09, $35, $1D, $39, $09, $09, $09, $01, $45, $01, $01, $49, $01, $11, $1D, $15, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $01, $4D, $51, $55, $01, $01, $21, $25, $29, $1D, $2D, $25, $25, $25, $25, $25, $05, $09, $09, $09, $09, $09, $09, $09, $35, $1D, $39, $09, $09, $09, $09, $0D, $11, $1D, $15, $1D, $1D, $15, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $19, $21, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $25, $31, $BA, $AA, $AA, $AA, $FB, $FA, $FA, $AA, $28, $AA, $AA, $AA, $AA, $AA, $AF, $AF	; .byte $11,$1d,$1d,$1d,$15,$1d,$1d,$1d,$1d,$15,$19,$01,$11,$15,$15,$19
 
