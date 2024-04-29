@@ -33,9 +33,12 @@
 	byteIndex: 					.res 1
 	bitIndex: 					.res 1
 	baseTile: 					.res 1
+	under_transparent: .res 1
 
 .segment "BSS"
-	collision_map: 				.res 240     ; 960 tiles / 8 tiles per byte = 120 bytes * 2 nametables = 240 bytes
+	collision_map: 				.res 256     ; 960 tiles / 8 tiles per byte = 120 bytes * 2 nametables = 240 bytes
+	transparent_tiles_x: .res 32
+	transparent_tiles_y: .res 32
 	tick_counter: 				.res 1
 	counter_1:					.res 1
 	counter_2:					.res 1
@@ -50,6 +53,7 @@
 	gameOverState:				.res 1
 	tick_over:					.res 1
 	tick_total:					.res 1
+	second_map:					.res 1
 
 
 .segment "STARTUP"
@@ -135,9 +139,6 @@
 .endproc
 
 .proc nmi_handler       ; NMI (“Non-Maskable Interrupt”) occurs when the PPU starts preparing the next frame of graphics, 60 times per second.
-	JMP handler
-	RTI
-	handler:
 	; Initialize OAM for DMA transfer
 	LDA #$00
 	STA $2003           ; Set OAM start address for DMA
@@ -292,10 +293,6 @@
 			STA total_count2
 			STA total_count3
 
-	; LDA #$00
-	; STA tileX
-	; STA tileY
-	; STA TileIndex
 	continue2:
 	LDA collision_change
 	CMP #0
@@ -322,10 +319,6 @@
 	LDA #$00
 	STA $2005
 	LDX #$00
-
-			; LDA #$00
-			; STA $2006  ; Reset PPU address high byte
-			; STA $2006  ; Reset PPU address low byte
 
 	; RESTORE REGISTERS & RETURN
 	PLA						; Pull Y of the stack and place it into the accumulator	register
@@ -361,10 +354,18 @@
 		; STA stageClearState
 		LDA #$10
 		STA frogY
-		LDa #$1A
+		LDA #$18
 		STA frogX
 		LDA #$00
 		STA scroll_offset
+
+		LDA #0
+		STA collision_table
+		STA scroll_offset
+		LDA #1
+		STA collision_change
+		STA second_map
+		JSR load_collisions
 		
 		LDX #$00
 		STX counter_3
@@ -639,13 +640,6 @@
 .endproc
 
 .proc drawCounter
-	; SAVE REGISTER INTO THE STACK
-	; PHP						; Push the Processor Status Register onto the stack
-	; PHA						; Push the Accumulator Register onto the stack
-	; TXA						; Transfer X into the Accumulator
-	; PHA						; Push X (the accumulator register) onto the stack
-	; TYA						; Transfer Y into the Accumulator
-	; PHA						; Push Y (the accumulator register) onto the stack
 
 	LDA counter_Y
 	STA $0200
@@ -720,15 +714,7 @@
 	STA $020B
 	CLC
 	ADC #$10   
- 
-	; RESTORE REGISTERS & RETURN
-	; PLA						; Pull Y of the stack and place it into the accumulator	register
-	; TAY						; Restore/Transfer the accumulator into Y
-	; PLA						; Pull X of the stack and place it into the accumulator	register
-	; TAX						; Restore/Transfer the accumulator into X
-	; PLA						; Pull the top value of the stack and place it into the accumulator register
-	; PLP						; Pull the top value of the stack and place it into the  processor status register
-	; RTS						; Return from subroutine
+
 .endproc
 
 .proc HandleMovement
@@ -758,10 +744,6 @@
 			check_right:
 				LDA #$25
 				STA frogDirection ; Set frogDirection to 25 (Right)
-
-				; LDA frogX
-				; CMP #$FF
-				; BEQ near_done
 				
 				LDA frogX
 				INC frogX       ; Move right
@@ -908,6 +890,7 @@
 				down_collision:
 				DEC frogY
 				JMP update_done
+				
 			button_start:
 				LDA controllerInput
 				AND #%00010000
@@ -924,15 +907,16 @@
 			no_movement:
 					LDA #$00
 					STA hasMoved ; Set hasMoved to 0
-					STA directionOffSet
 					; STA tileX
 					; STA tileY
 					; STA TileIndex
 					LDA #$0D
 					STA frogDirection
-					JMP update_done
+					RTS
 
 	update_done:
+		LDA #0
+		STA under_transparent
 		RTS
 .endproc
 
@@ -1031,17 +1015,6 @@
 		RTS	
 .endproc
 
-; .proc CheckCollision
-;     LDY byteIndex       ; Load the index for the collision map byte
-;     LDA col_map, Y      ; Load the byte from the collision map
-
-;     LDY bitIndex        ; Load the index for the bitmask
-;     LDA BitMask, Y      ; Load the bitmask from the BitMask array
-    
-;     AND #$FF            ; Correct usage, applies the previously loaded bitmask directly to A
-;     STA TileIndex       ; Store the result which indicates collision if non-zero
-;     RTS
-; .endproc
 
 .proc CheckCollision ; ------------------------------------------------------------------------------------------+
 	LDY byteIndex
@@ -1051,6 +1024,74 @@
 	AND BitMask, X
 	STA TileIndex
 	RTS
+.endproc
+
+.proc CheckTransparency ; ------------------------------------------------------------------------------------------+
+	; SAVE REGISTER INTO THE STACK
+	PHP						; Push the Processor Status Register onto the stack
+	PHA						; Push the Accumulator Register onto the stack
+	TXA						; Transfer X into the Accumulator
+	PHA						; Push X (the accumulator register) onto the stack
+	TYA						; Transfer Y into the Accumulator
+	PHA						; Push Y (the accumulator register) onto the stack
+
+	LDA under_transparent
+	CMP #0
+	BEQ check
+	JMP Exit
+
+	check:
+	; Get Tile indexes
+	LDA tempFrogX
+	CLC
+	ADC scroll_offset
+	AND #$FF
+	LSR A					; frogX / 2
+	LSR A					; frogX / 4
+	LSR A					; frogX / 8
+	STA tileX
+
+	check_x:
+	LDA transparent_tiles_x, X
+	CMP tileX
+	BEQ continue
+
+	INX
+	CPX #$20
+	BNE check_x
+	JMP not_transparent_tile
+
+	continue:
+	LDA tempFrogY
+	LSR A					; tileY / 2
+	LSR A					; tileY / 4
+	LSR A					; tileY / 8
+	STA tileY
+
+	LDA transparent_tiles_y, X
+	CMP tileY
+	BEQ in_transparent_tile
+	JMP not_transparent_tile
+
+	in_transparent_tile:
+	LDA #1
+	STA under_transparent
+
+	JMP Exit
+	
+	not_transparent_tile:
+	LDA #0
+	STA under_transparent
+
+	Exit:
+	; RESTORE REGISTERS & RETURN
+	PLA						; Pull Y of the stack and place it into the accumulator	register
+	TAY						; Restore/Transfer the accumulator into Y
+	PLA						; Pull X of the stack and place it into the accumulator	register
+	TAX						; Restore/Transfer the accumulator into X
+	PLA						; Pull the top value of the stack and place it into the accumulator register
+	PLP						; Pull the top value of the stack and place it into the  processor status register
+	RTS						; Return from subroutine
 .endproc
 
 .proc draw ; ------------------------------------------------------------------------------------------+
@@ -1164,6 +1205,10 @@
 	if_tile1:
 	LDA #$03
 	con_tile1:
+	LDA under_transparent
+  BEQ aboveBackground
+  ; ORA #$20           ; Set bit 5 to draw behind background
+  aboveBackground:
 	STA $0202, X        
 	LDA frogX
 	STA $0203, X  
@@ -1183,6 +1228,10 @@
 	if_tile2:
 	LDA #$03
 	con_tile2:
+	LDA under_transparent
+  BEQ aboveBackground2
+	; ORA #$20           ; Set bit 5 to draw behind background
+  aboveBackground2:
 	STA $0206, X         
 	LDA frogX
 	CLC
@@ -1206,6 +1255,10 @@
 	if_tile3:
 	LDA #$03
 	con_tile3:
+	LDA under_transparent
+  BEQ aboveBackground3
+  ; ORA #$20           ; Set bit 5 to draw behind background
+  aboveBackground3:
 	STA $020A, X         
 	LDA frogX
 	STA $020B, X
@@ -1227,6 +1280,10 @@
 	if_tile4:
 	LDA #$03
 	con_tile4:
+	LDA under_transparent
+  BEQ aboveBackground4
+  ; ORA #$20           ; Set bit 5 to draw behind background
+  aboveBackground4:
 	STA $020E, X         
 	LDA frogX				
 	CLC
@@ -1342,6 +1399,7 @@
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background1_lower
+			BMI load_background1_lower
 		LDA background_tile_offset
 		CLC
 		ADC #$10
@@ -1406,6 +1464,7 @@
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background2Upper
+			BMI load_background2Upper
 		; ; ; LOWER ---------------------------------------------------------------------------+		LDA background_offset_low
 		LDA background_offset_low
 		CLC
@@ -1439,6 +1498,7 @@
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background2_lower
+			BMI load_background2_lower
 		; JMP exit2
 		LDA background_tile_offset
 		CLC
@@ -1543,123 +1603,17 @@
 .endproc
 
 
-; .proc BuildCollisionMap
-;     LDX #0  ; Index for initializing collision_map
-
-; 	InitializeCollisionMap:
-; 			LDA #0
-; 			STA collision_map, X
-; 			INX
-; 			CPX #$F0  ; Total bytes for both nametables
-; 			BNE InitializeCollisionMap
-
-; 			LDX #0  ; Reset for building the map from nametable data
-
-; 	BuildMapLoop:
-; 			CPX #$F0  ; Check against the total entries expected
-; 			BCS FinishedBuildingMap
-
-; 			; Load base tile index from nametable
-; 			LDA background_screen1, X
-; 			STA baseTile
-; 			INX
-
-; 			LDY #0  ; Y will be used to iterate through the 2x2 tile matrix
-; 	ProcessTile:
-; 			TYA            ; Transfer Y to A for calculations
-; 			CLC
-; 			ADC baseTile   ; Add Y to baseTile to get the current tile index
-; 			TAX            ; Transfer result to X for CheckWalkable
-
-; 			; Perform walkability check
-; 			LDA #0         ; Reset X for walkable addresses loop
-; 	CheckWalkable:
-; 			LDA walkable_addresses, X
-; 			CMP #$FF       ; Check if end of walkable tile list
-; 			BEQ TileNotFound
-; 			CMP baseTile   ; Compare with the base tile index
-; 			BEQ FoundTile  ; If found, mark as walkable
-
-; 			INX            ; Move to next walkable address
-; 			JMP CheckWalkable
-
-; 	FoundTile:
-; 			; Set the bit in the collision map to indicate walkable
-; 			LDA #$01
-; 			STA TileIndex  ; Assume TileIndex is where we store if it's walkable
-
-; 			; Set the correct bit in collision_map
-; 			TXA            ; Reload the current tile index to A
-; 			LSR A
-; 			LSR A
-; 			LSR A          ; Divide index by 8 to get byte offset
-; 			STA temp
-
-; 			TXA            ; Reload tile index to A
-; 			AND #7         ; Get bit within byte
-; 			TAX            ; Use X for bit shifts
-
-; 			LDA #$01
-; 	ShiftBitmask:
-; 			DEX            ; Decrement X
-; 			BEQ DoneShifting ; Exit loop when X is 0
-; 			ASL A          ; Shift left to move '1' to the correct bit position
-; 			JMP ShiftBitmask
-
-; 	DoneShifting:
-; 			LDY temp   ; Load the byte offset into Y
-; 			LDA collision_map, Y ; Load the current value from the collision_map
-; 			ORA collision_map, Y          ; OR the bitmask with the current map value to set the bit
-
-; 			JMP NextTile   ; Continue to the next tile
-
-; 	TileNotFound:
-; 			; Handle tile not found case if needed
-; 			JMP NextTile
-
-; 	NextTile:
-; 			INY
-; 			CPY #4
-; 			BCC ProcessTile
-
-; 			JMP BuildMapLoop
-
-; 	FinishedBuildingMap:
-; 			RTS
-; .endproc
-
-
-
-; .proc createCollisionMap ; -------------------------------------------------------------------------+
-; 	LDX #$00         				; Start of the table
-; 	; CheckWalkable:
-; 	; 		LDA walkable_addresses, X
-; 	; 		CMP #$FF     				; $FF marks the end of walkable tile list
-; 	; 		BEQ TileNotFound
-; 	; 		CMP TileIndex 			; Compare with the fetched tile index
-; 	; 		BEQ FoundTile  			; Branch if it is a walkable tile
-; 	; 		INX
-; 	; 		JMP CheckWalkable
-; .endproc
-
-; .proc load_collisions ; -------------------------------------------------------------------------+
-; 		; Assume collision_map is in zero page or another RAM location
-;     LDX #0  ; Start index for the loop
-; 	copy_loop:
-;     LDA col_map, X  ; Load data from col_map (in ROM)
-;     STA collision_map, X  ; Store it in collision_map (in RAM)
-;     INX
-;     CPX #240
-; 		BNE copy_loop
-; .endproc
-
 .proc load_collisions ; -------------------------------------------------------------------------+
 	copy_loop:
-    LDA col_map, X  ; Load data from col_map (in ROM)
+    LDA #0
     STA collision_map, X  ; Store it in collision_map (in RAM)
     INX
     CPX #240
 		BNE copy_loop
+
+	LDA second_map
+	CMP #1
+	BEQ SecondMap
 	
 	LDA collision_table
 	CMP #1
@@ -1681,12 +1635,23 @@
 		STA scroll_offset
 		start:
     LDX #0  ; Start index for the loop
-	copy_loop1:
+		
+		copy_loop1:
     LDA col_map, X  ; Load data from col_map (in ROM)
     STA collision_map, X  ; Store it in collision_map (in RAM)
     INX
     CPX #240
 		BNE copy_loop1
+
+		LDX #0
+		load_transparent1:
+    LDA transparent_tiles_x1, X  ; Load data from transparent_tiles_x1 (in ROM)
+    STA transparent_tiles_x, X  ; Store it in transparent_tiles_x (in RAM)
+		LDA transparent_tiles_y1, X  ; Load data from transparent_tiles_y1 (in ROM)
+    STA transparent_tiles_y, X  ; Store it in transparent_tiles_y (in RAM)
+    INX
+    CPX #32
+		BNE load_transparent1
 		RTS
 
 	collisionMap2:
@@ -1707,6 +1672,86 @@
     INX
     CPX #240
 		BNE copy_loop2
+
+		LDX #0
+		load_transparent2:
+    LDA transparent_tiles_x2, X  ; Load data from transparent_tiles_x2 (in ROM)
+    STA transparent_tiles_x, X  ; Store it in transparent_tiles_x (in RAM)
+		LDA transparent_tiles_y2, X  ; Load data from transparent_tiles_y2 (in ROM)
+    STA transparent_tiles_y, X  ; Store it in transparent_tiles_y (in RAM)
+    INX
+    CPX #32
+		BNE load_transparent2
+		RTS
+	
+	SecondMap:
+	LDA collision_table
+	CMP #1
+	BEQ collisionMap4
+
+	collisionMap3:
+		LDA frogX
+		CMP #16
+		BEQ start2
+
+		LDA frogX
+		SEC
+		SBC #8
+		STA frogX
+
+		LDA scroll_offset
+		SEC
+		SBC #8
+		STA scroll_offset
+		start2:
+    LDX #0  ; Start index for the loop
+		
+		copy_loop3:
+    LDA col_map3, X  ; Load data from col_map (in ROM)
+    STA collision_map, X  ; Store it in collision_map (in RAM)
+    INX
+    CPX #240
+		BNE copy_loop3
+
+		LDX #0
+		load_transparent3:
+    LDA transparent_tiles_x3, X  ; Load data from transparent_tiles_x1 (in ROM)
+    STA transparent_tiles_x, X  ; Store it in transparent_tiles_x (in RAM)
+		LDA transparent_tiles_y3, X  ; Load data from transparent_tiles_y1 (in ROM)
+    STA transparent_tiles_y, X  ; Store it in transparent_tiles_y (in RAM)
+    INX
+    CPX #32
+		BNE load_transparent3
+		RTS
+
+	collisionMap4:
+	LDA frogX
+	CLC
+	ADC #8
+	STA frogX
+
+	LDA scroll_offset
+	CLC
+	ADC #8
+	STA scroll_offset
+
+	LDX #0  ; Start index for the loop
+	copy_loop4:
+    LDA col_map4, X  ; Load data from col_map (in ROM)
+    STA collision_map, X  ; Store it in collision_map (in RAM)
+    INX
+    CPX #240
+		BNE copy_loop4
+
+		LDX #0
+		load_transparent4:
+    LDA transparent_tiles_x4, X  ; Load data from transparent_tiles_x2 (in ROM)
+    STA transparent_tiles_x, X  ; Store it in transparent_tiles_x (in RAM)
+		LDA transparent_tiles_y4, X  ; Load data from transparent_tiles_y2 (in ROM)
+    STA transparent_tiles_y, X  ; Store it in transparent_tiles_y (in RAM)
+    INX
+    CPX #32
+		BNE load_transparent4
 	RTS
 .endproc
 
@@ -1821,9 +1866,126 @@ attribute_screen4:
 	.byte $55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55,$55
 	.byte $55,$55,$55,$55,$55,$55,$55,$55,$05,$05,$05,$05,$05,$05,$05,$05
 
+transparent_tiles_x1:
+	.byte $09, $13, $1B, $1D
+	.byte $08, $12, $1A, $1C
+	.byte $05, $0D, $1B, $1D
+	.byte $04, $0C, $1A, $1C
+	.byte $1B, $1D
+	.byte $1A, $1C
+	.byte $1B, $1D
+	.byte $1A, $1C
+	.byte $11
+	.byte $10
+	.byte $05, $0B
+	.byte $04, $0A
+	.byte $00, $00
 
-walkable_addresses:
-	.byte $05, $12, $14, $15, $16, $17, $18, $19, $1B, $D9, $1E, $1F, $20, $2A, $2C, $2D, $2F, $36, $38, $39, $3B, $D9, $DA, $DB, $DC, $FF
+transparent_tiles_y1:
+	.byte $02, $02, $02, $02
+	.byte $03, $03, $03, $03
+	.byte $04, $04, $04, $04
+	.byte $05, $05, $05, $05
+	.byte $06, $06
+	.byte $07, $07
+	.byte $08, $08
+	.byte $09, $09
+	.byte $14
+	.byte $15
+	.byte $1A, $1A
+	.byte $1B, $1B
+	.byte $00, $00
+
+
+transparent_tiles_x2:
+	.byte $11, $13, $15, $17
+	.byte $19, $1B, $1D, $10
+	.byte $12, $14, $16, $18
+	.byte $18, $1A, $1C, $1D
+	.byte $1C, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00
+	.byte $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+
+transparent_tiles_y2:
+	.byte $02, $02, $02, $02
+	.byte $02, $02, $02, $03
+	.byte $03, $03, $03, $03
+	.byte $03, $03, $03, $18
+	.byte $19, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00
+	.byte $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+
+transparent_tiles_x3:
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00
+	.byte $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+
+transparent_tiles_y3:
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00
+	.byte $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	
+transparent_tiles_x4:
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00
+	.byte $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+
+transparent_tiles_y4:
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00, $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00
+	.byte $00
+	.byte $00, $00
+	.byte $00, $00
+	.byte $00, $00
 
 col_map:
 	.byte %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
@@ -1888,6 +2050,70 @@ col_map:
 	.byte  %11111111, %11111000, %00000000, %11100011, %00000000, %00000000, %00000000, %00000000
 	.byte  %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
 	.byte  %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+
+col_map3:
+	.byte %11000011, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11000000, %00000000, %00000000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000000, %00000000, %00000000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000000, %00000000, %00000000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000000, %00000000, %00000000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111111, %11111111, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111111, %11111111, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111111, %11111111, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111111, %11111111, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111111, %11111111, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111111, %11111111, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111100, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111100, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111100, %00000000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111100, %00000000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111100, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111100, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111100, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111100, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000011, %11111100, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000000, %00000000, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000000, %00000000, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000000, %00000000, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000000, %00000000, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11000000, %00000000, %00000011, %11000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+
+col_map4:
+	.byte %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %00000000, %11110000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %00000000, %11110000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %00000000, %11110000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %00000000, %11110000, %00000011, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %00000000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %00000000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %00000000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %00000000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %11110000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %00000000, %00000000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %00000000, %00000000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %00000000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11110000, %11110000, %00000000, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
+	.byte %11111111, %11111111, %11111111, %11111111, %00000000, %00000000, %00000000, %00000000
 
 BitMask:
 	.byte %10000000
