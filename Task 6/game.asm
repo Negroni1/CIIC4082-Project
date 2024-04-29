@@ -44,11 +44,12 @@
 	stageClearState:			.res 1
 	total_count1: 				.res 1
 	total_count2:				.res 1
-	total_coutn2:				.res 1
+	total_count3:				.res 1
 	counter_X:					.res 1
 	counter_Y:					.res 1
 	gameOverState:				.res 1
 	tick_over:					.res 1
+	tick_total:					.res 1
 
 
 .segment "STARTUP"
@@ -107,6 +108,9 @@
 	STA level_change
 	STA gameOverState
 	STA tick_over
+	STA total_count1
+	STA total_count2
+	STA total_count3
 	
 	LDX #$20
 	STX background_offset_up
@@ -145,8 +149,11 @@
 	LDA gameOverState
 	CMP #$01
 	BEQ continue
-	JSR drawCounter
 	JSR drawStageClear
+	LDA stageClearState
+	CMP #$02
+	BEQ continue
+	JSR drawCounter
 	JSR changeStage
 
 	LDA #$00
@@ -237,11 +244,59 @@
 				BEQ continue
 				DEC counter_3
 	continue:
+
+	LDA tick_total
+	CMP #$3C
+	BEQ counter
+	CLC
+	ADC #$01
+	STA tick_total
+	JMP continue2
+
+	counter:
+		LDA stageClearState
+		CMP #$02
+		BEQ continue2
+		LDA #$00
+		STA tick_total
+		LDA total_count1
+		CMP #$09
+		BEQ counter2
+		CLC
+		ADC #$01
+		STA total_count1
+		JMP continue2
+		counter2:
+			LDA #$00 
+			STA total_count1
+			LDA total_count2
+			CMP #$09
+			BEQ counter3
+			CLC
+			ADC #$01
+			STA total_count2
+			JMP continue2
+		counter3:
+			LDA #$00 
+			STA total_count2
+			LDA total_count3
+			CMP #$09
+			BEQ gameOut
+			CLC
+			ADC #$01
+			STA total_count3
+			JMP continue2
+		gameOut:
+			LDA #$00
+			STA total_count1
+			STA total_count2
+			STA total_count3
+
 	; LDA #$00
 	; STA tileX
 	; STA tileY
 	; STA TileIndex
-
+	continue2:
 	LDA collision_change
 	CMP #0
 	BEQ continue_update
@@ -297,23 +352,25 @@
 	checkY:
 		LDA frogY
 		CMP #$CE
-		BNE continue
+		BPL continue
 		LDA level_change
 		CMP #$01
 		BEQ continue
 		LDA #$01
 		STA level_change
-		STA stageClearState
+		; STA stageClearState
 		LDA #$10
 		STA frogY
-		LDa #$08
+		LDa #$1A
 		STA frogX
+		LDA #$00
+		STA scroll_offset
 		
 		LDX #$00
 		STX counter_3
-		LDX #$01
+		LDX #$02
 		STX counter_2
-		LDX #$00
+		LDX #$05
 		STX counter_1
 
 	continue:
@@ -338,11 +395,18 @@
 
 	LDA stageClearState
 	CMP #$02
-	BNE exit
+	BNE to_exit
 
 	LDX #$88
 	STX counter_X
 	STX counter_Y
+
+	LDA total_count1
+	STA counter_1
+	LDA total_count2
+	STA counter_2
+	LDA total_count3
+	STA counter_3
 
 	LDX #$00
 	stage_clear:
@@ -351,18 +415,132 @@
 		INX
 		CPX #$38
 		BNE stage_clear
+		JMP continue
+	to_exit:
+		JMP exit2
+	continue:
 	
-	; LDA #$0D          		
-    ; STA frogDirection   	; Set frogDirection to 0D (Down)
-	; LDA #$70          		
-    ; STA frogX				; Set frog X position to 80
-    ; LDA #$20           		
-    ; STA frogY				; Set frog Y position to 60
-	; JSR drawAnimation		; Call drawAnimation
+	LDA #$88
+	STA $0240
+	CLC
+	ADC #$10    
+	LDA total_count3
+	CLC
+	ADC #$40
+	STA $0241   
+	LDA #$02
+	STA $0242        
+	LDA #$88
+	STA $0243
+	
+
+	LDA #$88
+	STA $0244
+	CLC
+	ADC #$10          
+	LDA total_count2
+	CLC
+	ADC #$40
+	STA $0245
+	CLC
+	ADC #$10     
+	LDA #$02
+	STA $0246
+	CLC
+	ADC #$10         
+	LDA #$88
+	CLC
+	ADC #$08
+	STA $0247
+	CLC
+	ADC #$10  
 
 
+	LDA #$88
+	STA $0248
+	CLC
+	ADC #$10       
+	LDA total_count1
+	CLC
+	ADC #$40
+	STA $0249
+	CLC
+	ADC #$10      
+	LDA #$02
+	STA $024A
+	CLC
+	ADC #$10          
+	LDA #$88
+	CLC
+	ADC #$10
+	STA $024B
+	CLC
+	ADC #$10   
+
+	LDA frogY
+	SEC
+	SBC #$08
+	STA $0250
+	LDA #$70
+	STA $0251  
+	LDA #$02
+	STA $0252        
+	LDA frogX
+	STA $0253
+
+	LDA frogY
+	SEC
+	SBC #$08
+	STA $0254
+	LDA #$71
+	STA $0255 
+	LDA #$02
+	STA $0256        
+	LDA frogX
+	CLC
+	ADC #$08
+	STA $0257
+
+
+	LDA tick_over
+	CLC
+	ADC #$01
+	STA tick_over
+	CMP #$1E
+	BEQ stage1
+	CMP #$3C
+	BEQ stage2
+	CMP #$78
+	BEQ stage3
+	CMP #$96
+	JMP exit
+	stage1:
+		LDA #$72
+		STA frogDirection
+		JSR drawFrog
+		JMP exit
+	stage2:
+		LDA #$76
+		STA frogDirection
+		JSR drawFrog
+		JMP exit
+	stage3:
+		LDA #$7A
+		STA frogDirection
+		JSR drawFrog
+		JMP exit
+	stage4:
+		LDA #$9D
+		STA frogDirection
+		JSR exit
+		LDA #$b4
+		STA tick_over
+		JMP exit
+
+	
 	exit:
-
+		JSR drawFrog
+	exit2:
 	; RESTORE REGISTERS & RETURN
 	PLA						; Pull Y of the stack and place it into the accumulator	register
 	TAY						; Restore/Transfer the accumulator into Y
@@ -462,12 +640,12 @@
 
 .proc drawCounter
 	; SAVE REGISTER INTO THE STACK
-	PHP						; Push the Processor Status Register onto the stack
-	PHA						; Push the Accumulator Register onto the stack
-	TXA						; Transfer X into the Accumulator
-	PHA						; Push X (the accumulator register) onto the stack
-	TYA						; Transfer Y into the Accumulator
-	PHA						; Push Y (the accumulator register) onto the stack
+	; PHP						; Push the Processor Status Register onto the stack
+	; PHA						; Push the Accumulator Register onto the stack
+	; TXA						; Transfer X into the Accumulator
+	; PHA						; Push X (the accumulator register) onto the stack
+	; TYA						; Transfer Y into the Accumulator
+	; PHA						; Push Y (the accumulator register) onto the stack
 
 	LDA counter_Y
 	STA $0200
@@ -544,13 +722,13 @@
 	ADC #$10   
  
 	; RESTORE REGISTERS & RETURN
-	PLA						; Pull Y of the stack and place it into the accumulator	register
-	TAY						; Restore/Transfer the accumulator into Y
-	PLA						; Pull X of the stack and place it into the accumulator	register
-	TAX						; Restore/Transfer the accumulator into X
-	PLA						; Pull the top value of the stack and place it into the accumulator register
-	PLP						; Pull the top value of the stack and place it into the  processor status register
-	RTS						; Return from subroutine
+	; PLA						; Pull Y of the stack and place it into the accumulator	register
+	; TAY						; Restore/Transfer the accumulator into Y
+	; PLA						; Pull X of the stack and place it into the accumulator	register
+	; TAX						; Restore/Transfer the accumulator into X
+	; PLA						; Pull the top value of the stack and place it into the accumulator register
+	; PLP						; Pull the top value of the stack and place it into the  processor status register
+	; RTS						; Return from subroutine
 .endproc
 
 .proc HandleMovement
@@ -730,7 +908,18 @@
 				down_collision:
 				DEC frogY
 				JMP update_done
-		button_start:
+			button_start:
+				LDA controllerInput
+				AND #%00010000
+				BEQ no_movement
+				; TODO: CHAGE MAP
+				; LDA level_change
+				; EOR #%01
+				; STA level_change
+				; LDA #$00
+				; STA scroll_offset
+				LDX #$02
+				STX stageClearState
 
 			no_movement:
 					LDA #$00
@@ -1098,6 +1287,7 @@
 		STA $2006							; Upper Tiles address
 
 		; LDX #$00
+		CLC
 		LDX background_tile_offset
 		load_background1Upper:           	; Iterate through the BACKGROUND to draw UPPER TILES
 			; UPPER LEFT
@@ -1114,6 +1304,7 @@
 			CLC
 			ADC #$01
 			STA $2007						; Store X into 2001
+			CLC
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background1Upper
@@ -1147,6 +1338,7 @@
 			CLC
 			ADC #$01						
 			STA $2007						; Store it into PPUDATA
+			CLC
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background1_lower
@@ -1200,7 +1392,7 @@
 			LDA level_change
 			CMP #$01
 			BNE screen2_up
-			LDA background_screen3, X 
+			LDA background_screen4, X 
 			JMP screen2_con
 			screen2_up:
 			LDA background_screen2, X 
@@ -1210,6 +1402,7 @@
 			CLC
 			ADC #$01
 			STA $2007						; Store X into 2001
+			CLC
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background2Upper
@@ -1242,6 +1435,7 @@
 			CLC
 			ADC #$01						
 			STA $2007						; Store it into PPUDATA
+			CLC
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background2_lower
@@ -1329,7 +1523,7 @@
         BPL vblankwait
 		LDA #%10010000  ; turn on NMIs, sprites use first pattern table
 		STA $2000       ; Store A in PPU Control
-		LDA #%00011110  ; turn on screen
+		LDA #%01011110  ; turn on screen
 		STA $2001       ; Store A in PPU Mask
 	LDA #$00
 	STA level_change
@@ -1545,7 +1739,7 @@
         BPL vblankwait
         LDA #%10010000  	; turn on NMIs, sprites use first pattern table
         STA $2000       	; Store A in PPU Control
-        LDA #%00011110  	; turn on screen
+        LDA #%01111110  	; turn on screen
         STA $2001       	; Store A in PPU Mask
 
     forever:
