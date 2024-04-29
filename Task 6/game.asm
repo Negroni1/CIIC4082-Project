@@ -340,8 +340,11 @@
 	PHA						; Push Y (the accumulator register) onto the stack
 
 	LDA frogX
-	CMP #$F4
-	BNE continue
+	LSR A
+	LSR A
+	LSR A
+	CMP #26
+	BMI continue
 	checkY:
 		LDA frogY
 		CMP #$CE
@@ -354,9 +357,9 @@
 		; STA stageClearState
 		LDA #$10
 		STA frogY
-		LDA #$18
+		LDA #160
 		STA frogX
-		LDA #$00
+		LDA #16
 		STA scroll_offset
 
 		LDA #0
@@ -907,9 +910,7 @@
 			no_movement:
 					LDA #$00
 					STA hasMoved ; Set hasMoved to 0
-					; STA tileX
-					; STA tileY
-					; STA TileIndex
+					STA directionOffSet
 					LDA #$0D
 					STA frogDirection
 					RTS
@@ -1205,10 +1206,14 @@
 	if_tile1:
 	LDA #$03
 	con_tile1:
+	TAY
 	LDA under_transparent
-  BEQ aboveBackground
-  ; ORA #$20           ; Set bit 5 to draw behind background
-  aboveBackground:
+  BEQ aboveBackground1
+	TYA
+  ORA #$20
+	TAY           ; Set bit 5 to draw behind background
+  aboveBackground1:
+	TYA
 	STA $0202, X        
 	LDA frogX
 	STA $0203, X  
@@ -1228,10 +1233,14 @@
 	if_tile2:
 	LDA #$03
 	con_tile2:
+	TAY
 	LDA under_transparent
   BEQ aboveBackground2
-	; ORA #$20           ; Set bit 5 to draw behind background
+	TYA
+  ORA #$20
+	TAY           ; Set bit 5 to draw behind background
   aboveBackground2:
+	TYA
 	STA $0206, X         
 	LDA frogX
 	CLC
@@ -1255,10 +1264,14 @@
 	if_tile3:
 	LDA #$03
 	con_tile3:
+	TAY
 	LDA under_transparent
   BEQ aboveBackground3
-  ; ORA #$20           ; Set bit 5 to draw behind background
+	TYA
+  ORA #$20
+	TAY           ; Set bit 5 to draw behind background
   aboveBackground3:
+	TYA
 	STA $020A, X         
 	LDA frogX
 	STA $020B, X
@@ -1280,10 +1293,14 @@
 	if_tile4:
 	LDA #$03
 	con_tile4:
+	TAY
 	LDA under_transparent
   BEQ aboveBackground4
-  ; ORA #$20           ; Set bit 5 to draw behind background
+	TYA
+  ORA #$20
+	TAY           ; Set bit 5 to draw behind background
   aboveBackground4:
+	TYA
 	STA $020E, X         
 	LDA frogX				
 	CLC
@@ -1314,7 +1331,7 @@
     TYA
     PHA
     ; WRITE BACKGROUND DATA ---------------------------------------------------------------+
-	LDX #$00
+	LDX 00
 	STX background_tile_offset
 	; ; BACKGROUND 1 ----------------------------------------------------------------------+
 	; ; ; UPPER ---------------------------------------------------------------------------+
@@ -1344,7 +1361,6 @@
 		STA $2006							; Upper Tiles address
 
 		; LDX #$00
-		CLC
 		LDX background_tile_offset
 		load_background1Upper:           	; Iterate through the BACKGROUND to draw UPPER TILES
 			; UPPER LEFT
@@ -1361,7 +1377,6 @@
 			CLC
 			ADC #$01
 			STA $2007						; Store X into 2001
-			CLC
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background1Upper
@@ -1378,7 +1393,7 @@
 		STA $2006							; Lower Tiles Address
 
 		LDX background_tile_offset
-		load_background1_lower:           	; Iterate through the BACKGROUND to draw LOWER TILES
+		load_background1_lower:           	
 			; LOWER LEFT
 			LDA level_change
 			CMP #$01
@@ -1389,17 +1404,15 @@
 			LDA background_screen1, X 
 			screen1_con_low:
 			CLC
-			ADC #$02						; Sum 2 such that it takes the lower left
+			ADC #$02						
 			STA $2007           			; Store it into PPUDATA
 			; LOWER RIGHT
 			CLC
 			ADC #$01						
 			STA $2007						; Store it into PPUDATA
-			CLC
 			INX
-			CPX #$10            			; Compare X, If X == 255 stop the loop
+			CPX #$10            			; Compare X,
 			BNE load_background1_lower
-			BMI load_background1_lower
 		LDA background_tile_offset
 		CLC
 		ADC #$10
@@ -1450,7 +1463,7 @@
 			LDA level_change
 			CMP #$01
 			BNE screen2_up
-			LDA background_screen4, X 
+			LDA background_screen3, X 
 			JMP screen2_con
 			screen2_up:
 			LDA background_screen2, X 
@@ -1464,7 +1477,6 @@
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background2Upper
-			BMI load_background2Upper
 		; ; ; LOWER ---------------------------------------------------------------------------+		LDA background_offset_low
 		LDA background_offset_low
 		CLC
@@ -1498,7 +1510,6 @@
 			INX
 			CPX #$10            			; Compare X, If X == 255 stop the loop
 			BNE load_background2_lower
-			BMI load_background2_lower
 		; JMP exit2
 		LDA background_tile_offset
 		CLC
@@ -1553,6 +1564,7 @@
 		LDA attribute_screen1, X       			; Iterate through the attributes to draw them
 		attribute1_con:
 		STA $2007         				; Store X into PPUDATA
+		CLC
         INX                 			; Increase X
         CPX #$40            			; Compare X, If X > 192 (12 16bit sprites) stop the loop
         BNE load_attribute
@@ -1583,7 +1595,7 @@
         BPL vblankwait
 		LDA #%10010000  ; turn on NMIs, sprites use first pattern table
 		STA $2000       ; Store A in PPU Control
-		LDA #%01011110  ; turn on screen
+		LDA #%00011110  ; turn on screen
 		STA $2001       ; Store A in PPU Mask
 	LDA #$00
 	STA level_change
